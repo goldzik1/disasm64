@@ -115,7 +115,20 @@ std::string mnemStr(const Instruction& insn) {
         case Mnemonic::Movdqa: return "movdqa"; case Mnemonic::Movdqu: return "movdqu";
         case Mnemonic::Movd: return "movd"; case Mnemonic::Movq: return "movq";
         case Mnemonic::Pxor: return "pxor"; case Mnemonic::Xorps: return "xorps"; case Mnemonic::Xorpd: return "xorpd";
-        default: return "(bad)";
+        default: {
+            Mnemonic m = insn.mnemonic;
+            if (m >= Mnemonic::Addps && m <= Mnemonic::Sqrtsd) {
+                static const char* base[] = {"add", "mul", "sub", "div", "sqrt"};
+                static const char* sfx[]  = {"ps", "pd", "ss", "sd"};
+                int i = int(m) - int(Mnemonic::Addps);
+                return std::string(base[i / 4]) + sfx[i % 4];
+            }
+            if (m >= Mnemonic::Ucomiss && m <= Mnemonic::Comisd) {
+                static const char* n[] = {"ucomiss", "ucomisd", "comiss", "comisd"};
+                return n[int(m) - int(Mnemonic::Ucomiss)];
+            }
+            return "(bad)";
+        }
     }
 }
 

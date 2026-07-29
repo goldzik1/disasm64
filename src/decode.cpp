@@ -73,7 +73,15 @@ bool decode0F(Reader& r, Instruction& insn) {
         if (store) { addOp(insn, rm); addOp(insn, xmm(reg)); }
         else { addOp(insn, xmm(reg)); addOp(insn, rm); }
     };
+    auto sseArith = [&](M base) { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16; insn.mnemonic = M(int(base) + pp); vecEG(msz, false); };
     switch (op) {
+        case 0x58: sseArith(M::Addps); return true;
+        case 0x59: sseArith(M::Mulps); return true;
+        case 0x5C: sseArith(M::Subps); return true;
+        case 0x5E: sseArith(M::Divps); return true;
+        case 0x51: sseArith(M::Sqrtps); return true;
+        case 0x2E: if (pp >= 2) return false; { int msz = pp == 1 ? 8 : 4; insn.mnemonic = M(int(M::Ucomiss) + pp); vecEG(msz, false); } return true;
+        case 0x2F: if (pp >= 2) return false; { int msz = pp == 1 ? 8 : 4; insn.mnemonic = M(int(M::Comiss) + pp); vecEG(msz, false); } return true;
         case 0x10: case 0x11: { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16;
             insn.mnemonic = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd;
             vecEG(msz, op == 0x11); return true; }
