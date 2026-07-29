@@ -24,8 +24,11 @@ and packed arithmetic (add/mul/sub/div/sqrt/min/max in ps/pd/ss/sd), compares
 (cmpps/cmpss, ucomiss/comisd), conversions (cvtsi2ss, cvttsd2si, cvtss2sd, cvtdq2ps…),
 packed integer (padd/psub b/w/d/q, pcmpeq/pcmpgt), shuffles (pshufd/shufps),
 unpack, and movmskps/pmovmskb — with xmm operands and correct scalar-vs-packed memory
-sizes. Every one of those has its **AVX (VEX)** form too — the three-operand
-`vaddss xmm0, xmm1, xmm2`, ymm operands, 2- and 3-byte VEX, the lot.
+sizes. The **0F38 / 0F3A** three-byte maps are in as well — SSSE3 and SSE4 (pshufb, ptest,
+pmovzx/sx, pmin/pmax, pmulld, palignr, roundps, blendps, the pcmp*str* family, movbe…).
+And every one of these — one-, two-, and three-byte maps alike — has its **AVX (VEX)**
+form too: the three-operand `vaddss xmm0, xmm1, xmm2`, `vpshufb ymm0, ymm0, ymm1`, ymm
+operands, 2- and 3-byte VEX, the lot.
 
 Instruction length is byte-exact, and the decoder is fuzzed to never crash, hang, or
 return a nonsense length on arbitrary input (millions of random decodes, zero anomalies).
@@ -80,11 +83,16 @@ just a printer.
 Being built in stages; the general-purpose core plus the SSE slice above is the
 foundation.
 
-- **The 0F38 / 0F3A maps.** SSSE3/SSE4 and AVX2 (pshufb, pblendw, ptest, pmovzx,
-  roundps, the pcmpistri family…) live in the three-byte maps; those and their VEX
-  forms come next, emitted from a permissive open ISA dataset and committed so the
-  build stays dependency-free — the engine, operand model, and formatter stay
-  hand-written.
+- **Semantic metadata.** Per-instruction EFLAGS read/written, implicit operands,
+  per-operand read/write access, and ISA-set / category — so the decode feeds analysis,
+  not just a printer.
+- **An RE layer.** A full hook/trampoline helper on top of `relocate`, an
+  anti-disassembly annotator (overlapping instructions, junk prefixes, non-canonical
+  encodings), and a redundant-encoding detector that uses the encoder to compute the
+  canonical form.
+- Remaining long-tail encodings (pinsr/pextr, the shift-by-imm groups, x87, AVX-512)
+  emitted from a permissive open ISA dataset and committed so the build stays
+  dependency-free.
 - **Semantic metadata.** Per-instruction flags read/written, implicit operands,
   per-operand read/write access, and ISA-set / category.
 - **RE layer.** A full hook/trampoline helper on top of `relocate`, an anti-disassembly
