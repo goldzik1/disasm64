@@ -93,6 +93,25 @@ for (auto& f : disasm64::antiDisasmScan(code, n, base)) /* f.address, f.what */;
 instructions come back byte-for-byte, RIP-relative and rel32 displacements are fixed up
 so the effective target is preserved.
 
+## Encoder — the decode is reversible
+
+```cpp
+#include "disasm64/encode.h"
+
+disasm64::DecodeResult d = disasm64::decode(bytes, n, addr);
+uint8_t out[16];
+disasm64::EncodeResult e = disasm64::encode(d.insn, out, sizeof out);   // e.length bytes
+```
+
+`encode` re-emits an `Instruction` to machine code, so the pipeline is
+decode → **mutate the structured instruction** → encode: rewrite operands, promote a
+short branch to `rel32`, drop a prefix, build a patch. It covers the general-purpose
+integer core (SIMD/x87 report `Unsupported`) and picks a canonical encoding — the REX,
+ModRM/SIB, displacement and immediate widths, the `moffs` form for a 64-bit absolute, the
+`mov cr/dr` and segment forms. It's held to a **round-trip invariant checked over millions
+of samples**: for every instruction the encoder accepts, `decode(encode(i))` reproduces
+`i`.
+
 ## Building
 
 Drop `include/` and `src/` into your project, or take the **single header** — one file,

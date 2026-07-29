@@ -44,11 +44,12 @@ int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm, Re
         int scale = 1 << (sib >> 6);
         int index = ((sib >> 3) & 7) | (pfx.rexX ? 8 : 0);
         int base = (sib & 7) | (pfx.rexB ? 8 : 0);
-        m.scale = uint8_t(scale);
         if (((sib >> 3) & 7) == 4 && !pfx.rexX) {
-            m.index.cls = RegClass::None;         // no index (rsp slot)
+            m.index.cls = RegClass::None;         // no index (rsp slot); scale is then meaningless
+            m.scale = 1;
         } else {
             m.index.cls = addrCls; m.index.idx = uint8_t(index);
+            m.scale = uint8_t(scale);
         }
         if ((sib & 7) == 5 && mod == 0) {
             m.base.cls = RegClass::None;          // no base, disp32

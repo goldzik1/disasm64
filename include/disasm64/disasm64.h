@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "encode.h"
 #include <string>
 #include <vector>
 
