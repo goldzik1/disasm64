@@ -1,0 +1,121 @@
+#include "disasm64/disasm64.h"
+#include <string>
+#include <cstdio>
+
+namespace disasm64 {
+namespace {
+
+const char* kGpr64[16] = {"rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"};
+const char* kGpr32[16] = {"eax","ecx","edx","ebx","esp","ebp","esi","edi","r8d","r9d","r10d","r11d","r12d","r13d","r14d","r15d"};
+const char* kGpr16[16] = {"ax","cx","dx","bx","sp","bp","si","di","r8w","r9w","r10w","r11w","r12w","r13w","r14w","r15w"};
+const char* kGpr8[16]  = {"al","cl","dl","bl","spl","bpl","sil","dil","r8b","r9b","r10b","r11b","r12b","r13b","r14b","r15b"};
+const char* kGpr8Hi[8] = {"al","cl","dl","bl","ah","ch","dh","bh"};
+const char* kSeg[6]    = {"es","cs","ss","ds","fs","gs"};
+const char* kCC[16]    = {"o","no","b","ae","e","ne","be","a","s","ns","p","np","l","ge","le","g"};
+
+std::string hex(uint64_t v) {
+    char b[19]; std::snprintf(b, sizeof b, "0x%llx", (unsigned long long)v); return b;
+}
+
+std::string regName(const Reg& r) {
+    switch (r.cls) {
+        case RegClass::Gpr64: return kGpr64[r.idx & 15];
+        case RegClass::Gpr32: return kGpr32[r.idx & 15];
+        case RegClass::Gpr16: return kGpr16[r.idx & 15];
+        case RegClass::Gpr8:  return kGpr8[r.idx & 15];
+        case RegClass::Gpr8Hi: return kGpr8Hi[r.idx & 7];
+        case RegClass::Xmm:   return "xmm" + std::to_string(r.idx);
+        case RegClass::Ymm:   return "ymm" + std::to_string(r.idx);
+        case RegClass::Rip:   return "rip";
+        default: return "?";
+    }
+}
+
+const char* ptrKind(uint8_t sz) {
+    switch (sz) {
+        case 1: return "byte ptr ";
+        case 2: return "word ptr ";
+        case 4: return "dword ptr ";
+        case 8: return "qword ptr ";
+        case 16: return "xmmword ptr ";
+        case 32: return "ymmword ptr ";
+        default: return "";
+    }
+}
+
+std::string memStr(const MemOperand& m, uint8_t sizeBytes) {
+    std::string s = ptrKind(sizeBytes);
+    if (m.segment != 0xFF && m.segment < 6) s += std::string(kSeg[m.segment]) + ":";
+    s += "[";
+    bool has = false;
+    if (m.ripRelative) { s += "rip"; has = true; }
+    else if (m.base.cls != RegClass::None) { s += regName(m.base); has = true; }
+    if (m.index.cls != RegClass::None) {
+        if (has) s += "+";
+        s += regName(m.index);
+        if (m.scale != 1) s += "*" + std::to_string(m.scale);
+        has = true;
+    }
+    if (m.disp != 0 || !has || m.ripRelative) {
+        if (has) s += (m.disp < 0 ? "-" : "+");
+        int64_t d = m.disp;
+        s += hex(uint64_t(has && d < 0 ? -d : d));
+    }
+    s += "]";
+    return s;
+}
+
+std::string operandStr(const Operand& o) {
+    switch (o.kind) {
+        case OperandKind::Reg: return regName(o.reg);
+        case OperandKind::Mem: return memStr(o.mem, o.sizeBytes);
+        case OperandKind::Imm: {
+            uint64_t mask = (o.sizeBytes == 0 || o.sizeBytes >= 8) ? ~0ull : ((1ull << (8 * o.sizeBytes)) - 1);
+            return hex(uint64_t(o.imm) & mask);
+        }
+        case OperandKind::Rel: return hex(o.relTarget);
+        default: return "";
+    }
+}
+
+std::string mnemStr(const Instruction& insn) {
+    switch (insn.mnemonic) {
+        case Mnemonic::Add: return "add";   case Mnemonic::Or: return "or";    case Mnemonic::Adc: return "adc";
+        case Mnemonic::Sbb: return "sbb";   case Mnemonic::And: return "and";  case Mnemonic::Sub: return "sub";
+        case Mnemonic::Xor: return "xor";   case Mnemonic::Cmp: return "cmp";  case Mnemonic::Push: return "push";
+        case Mnemonic::Pop: return "pop";   case Mnemonic::Mov: return "mov";  case Mnemonic::Lea: return "lea";
+        case Mnemonic::Nop: return "nop";   case Mnemonic::Xchg: return "xchg";case Mnemonic::Test: return "test";
+        case Mnemonic::Inc: return "inc";   case Mnemonic::Dec: return "dec";  case Mnemonic::Neg: return "neg";
+        case Mnemonic::Not: return "not";   case Mnemonic::Mul: return "mul";  case Mnemonic::Imul: return "imul";
+        case Mnemonic::Div: return "div";   case Mnemonic::Idiv: return "idiv";case Mnemonic::Shl: return "shl";
+        case Mnemonic::Shr: return "shr";   case Mnemonic::Sar: return "sar";  case Mnemonic::Rol: return "rol";
+        case Mnemonic::Ror: return "ror";   case Mnemonic::Rcl: return "rcl";  case Mnemonic::Rcr: return "rcr";
+        case Mnemonic::Movzx: return "movzx"; case Mnemonic::Movsx: return "movsx"; case Mnemonic::Movsxd: return "movsxd";
+        case Mnemonic::Cwde: return "cwde"; case Mnemonic::Cdqe: return "cdqe";case Mnemonic::Cdq: return "cdq";
+        case Mnemonic::Cqo: return "cqo";   case Mnemonic::Jmp: return "jmp";  case Mnemonic::Call: return "call";
+        case Mnemonic::Ret: return "ret";   case Mnemonic::Leave: return "leave"; case Mnemonic::Int3: return "int3";
+        case Mnemonic::Int: return "int";   case Mnemonic::Hlt: return "hlt";  case Mnemonic::Cpuid: return "cpuid";
+        case Mnemonic::Rdtsc: return "rdtsc";
+        case Mnemonic::Jcc: return std::string("j") + kCC[insn.cc & 15];
+        case Mnemonic::Setcc: return std::string("set") + kCC[insn.cc & 15];
+        case Mnemonic::Cmovcc: return std::string("cmov") + kCC[insn.cc & 15];
+        default: return "(bad)";
+    }
+}
+
+} // namespace
+
+std::string formatIntel(const Instruction& insn) {
+    std::string s;
+    if (insn.prefixes.lock) s += "lock ";
+    if (insn.prefixes.rep == 0xF3) s += "rep ";
+    else if (insn.prefixes.rep == 0xF2) s += "repne ";
+    s += mnemStr(insn);
+    for (int i = 0; i < insn.operandCount; ++i) {
+        s += (i == 0) ? " " : ", ";
+        s += operandStr(insn.operands[i]);
+    }
+    return s;
+}
+
+} // namespace disasm64

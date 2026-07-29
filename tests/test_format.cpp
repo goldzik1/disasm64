@@ -1,0 +1,31 @@
+#include "check.h"
+#include "disasm64/disasm64.h"
+#include <string>
+using namespace disasm64;
+
+static std::string fmt(std::initializer_list<uint8_t> bytes, uint64_t addr = 0) {
+    static uint8_t buf[16];
+    size_t n = 0; for (uint8_t b : bytes) buf[n++] = b;
+    DecodeResult r = decode(buf, n, addr);
+    if (r.status != DecodeStatus::Ok) return "<invalid>";
+    return formatIntel(r.insn);
+}
+
+TEST_MAIN({
+    CHECK_STR(fmt({0x90}), "nop");
+    CHECK_STR(fmt({0xC3}), "ret");
+    CHECK_STR(fmt({0xCC}), "int3");
+    CHECK_STR(fmt({0x55}), "push rbp");
+    CHECK_STR(fmt({0x48, 0x89, 0xE5}), "mov rbp, rsp");
+    CHECK_STR(fmt({0xB8, 0x01, 0x00, 0x00, 0x00}), "mov eax, 0x1");
+    CHECK_STR(fmt({0x83, 0xC0, 0x05}), "add eax, 0x5");
+    CHECK_STR(fmt({0x48, 0x83, 0xEC, 0x20}), "sub rsp, 0x20");
+    CHECK_STR(fmt({0xC6, 0x00, 0xFF}), "mov byte ptr [rax], 0xff");
+    CHECK_STR(fmt({0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00}), "mov rax, qword ptr [rip+0x10]");
+    CHECK_STR(fmt({0x48, 0x8D, 0x3D, 0x00, 0x00, 0x00, 0x00}), "lea rdi, [rip+0x0]");
+    CHECK_STR(fmt({0xE8, 0x00, 0x00, 0x00, 0x00}), "call 0x5");
+    CHECK_STR(fmt({0xFF, 0xD0}), "call rax");
+    CHECK_STR(fmt({0x0F, 0xB6, 0xC1}), "movzx eax, cl");
+    CHECK_STR(fmt({0x74, 0x05}), "je 0x7");
+    CHECK_STR(fmt({0x48, 0xFF, 0xC0}), "inc rax");
+})
