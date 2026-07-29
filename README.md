@@ -72,13 +72,24 @@ so the effective target is preserved.
 
 ## Building
 
+Drop `include/` and `src/` into your project, or take the **single header** — one file,
+STB-style:
+
+```cpp
+#define DISASM64_IMPLEMENTATION   // in exactly one translation unit
+#include "disasm64.h"             // from single_include/
+```
+
+Or build the tests, examples, and CLI with CMake:
+
 ```
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build
 ```
 
-C++17, no dependencies, builds with MSVC or gcc/clang.
+C++17, no dependencies, builds with MSVC or gcc/clang. Regenerate the single header with
+`tools/amalgamate.sh` after editing the split sources.
 
 ## The model
 

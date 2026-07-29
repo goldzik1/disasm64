@@ -31,3 +31,8 @@ foreach(t reader prefix decode format relocate analysis)
 endforeach()
 
 add_test(NAME robust COMMAND robust --count 300000 --seed 1)
+
+# Single-header build (STB-style) — compiled and run to prove the amalgamation works.
+add_executable(single_header examples/single_header_demo.cpp)
+target_include_directories(single_header PRIVATE single_include)
+add_test(NAME single_header COMMAND single_header)
