@@ -18,7 +18,7 @@ Reg makeGpr(int num, int sizeBytes, bool rexPresent) {
     return reg;
 }
 
-int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm) {
+int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm, RegClass rmRegClass) {
     uint8_t modrm = r.u8();
     int mod = modrm >> 6;
     int reg = ((modrm >> 3) & 7) | (pfx.rexR ? 8 : 0);
@@ -28,7 +28,8 @@ int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm) {
     if (mod == 3) {                       // register direct
         rm.kind = OperandKind::Reg;
         rm.sizeBytes = uint8_t(rmSizeBytes);
-        rm.reg = makeGpr(rmf | (pfx.rexB ? 8 : 0), rmSizeBytes, pfx.rex);
+        if (rmRegClass != RegClass::None) { rm.reg.cls = rmRegClass; rm.reg.idx = uint8_t(rmf | (pfx.rexB ? 8 : 0)); }
+        else rm.reg = makeGpr(rmf | (pfx.rexB ? 8 : 0), rmSizeBytes, pfx.rex);
         return reg;
     }
 

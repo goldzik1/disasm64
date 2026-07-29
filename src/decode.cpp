@@ -63,7 +63,33 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op >= 0x90 && op <= 0x9F) { Operand e; decodeModRM(r, p, 1, e); insn.mnemonic = M::Setcc; insn.cc = op & 0xF; addOp(insn, e); return true; }
     if (op == 0xB6 || op == 0xB7) { int es = (op == 0xB6) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movzx; addOp(insn, x.g); addOp(insn, x.e); return true; }
     if (op == 0xBE || op == 0xBF) { int es = (op == 0xBE) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movsx; addOp(insn, x.g); addOp(insn, x.e); return true; }
-    return false;
+
+    // SSE (curated subset). Mandatory prefix selects the variant: none/66/F3/F2.
+    const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;
+    auto xmm = [](int idx) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = RegClass::Xmm; o.reg.idx = uint8_t(idx); o.sizeBytes = 16; return o; };
+    auto vecEG = [&](int memSz, bool store) {
+        Operand rm; int reg = decodeModRM(r, p, memSz, rm, RegClass::Xmm);
+        if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16;
+        if (store) { addOp(insn, rm); addOp(insn, xmm(reg)); }
+        else { addOp(insn, xmm(reg)); addOp(insn, rm); }
+    };
+    switch (op) {
+        case 0x10: case 0x11: { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16;
+            insn.mnemonic = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd;
+            vecEG(msz, op == 0x11); return true; }
+        case 0x28: case 0x29: { if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Movapd : M::Movaps; vecEG(16, op == 0x29); return true; }
+        case 0x6F: case 0x7F: { if (pp != 1 && pp != 2) return false; insn.mnemonic = pp == 1 ? M::Movdqa : M::Movdqu; vecEG(16, op == 0x7F); return true; }
+        case 0x57: { if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Xorpd : M::Xorps; vecEG(16, false); return true; }
+        case 0xEF: { if (pp != 1) return false; insn.mnemonic = M::Pxor; vecEG(16, false); return true; }
+        case 0x6E: { if (pp != 1) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm);
+            insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
+        case 0x7E: {
+            if (pp == 1) { int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm);
+                insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+            if (pp == 2) { insn.mnemonic = M::Movq; vecEG(8, false); return true; }
+            return false; }
+        default: return false;
+    }
 }
 
 bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {

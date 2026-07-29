@@ -34,4 +34,11 @@ TEST_MAIN({
     CHECK_STR(fmt({0x0F, 0x05}), "syscall");
     CHECK_STR(fmt({0xFC}), "cld");
     CHECK_STR(fmt({0x9C}), "pushf");
+    // SSE
+    CHECK_STR(fmt({0x0F, 0x28, 0xC1}), "movaps xmm0, xmm1");
+    CHECK_STR(fmt({0x66, 0x0F, 0x6F, 0xC1}), "movdqa xmm0, xmm1");
+    CHECK_STR(fmt({0xF3, 0x0F, 0x10, 0xC1}), "movss xmm0, xmm1");
+    CHECK_STR(fmt({0x66, 0x0F, 0xEF, 0xC0}), "pxor xmm0, xmm0");
+    CHECK_STR(fmt({0x66, 0x48, 0x0F, 0x6E, 0xC8}), "movq xmm1, rax");
+    CHECK_STR(fmt({0x0F, 0x10, 0x04, 0x24}), "movups xmm0, xmmword ptr [rsp]");
 })

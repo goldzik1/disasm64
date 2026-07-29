@@ -71,6 +71,9 @@ enum class Mnemonic : uint16_t {
     Setcc, Cmovcc,
     Syscall, Ud2, Cmc, Clc, Stc, Cld, Std, Cli, Sti, Pushf, Popf,
     Movs, Stos, Lods, Scas, Cmps,
+    // SSE (curated)
+    Movups, Movupd, Movss, Movsd, Movaps, Movapd, Movdqa, Movdqu,
+    Movd, Movq, Pxor, Xorps, Xorpd,
     Count
 };
 

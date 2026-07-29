@@ -12,6 +12,9 @@ Reg makeGpr(int num, int sizeBytes, bool rexPresent);
 // `rm` as an operand of `rmSizeBytes`. Returns the reg field (0..15, REX.R applied)
 // so the caller can build the register operand separately. RIP-relative memory
 // leaves disp in place; the caller resolves ripTarget once the length is known.
-int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm);
+// `rmRegClass` overrides the register class when the r/m is a register (mod==3),
+// e.g. RegClass::Xmm for SSE forms; RegClass::None keeps the GPR default.
+int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm,
+                RegClass rmRegClass = RegClass::None);
 
 } // namespace disasm64

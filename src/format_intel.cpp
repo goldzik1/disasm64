@@ -109,6 +109,12 @@ std::string mnemStr(const Instruction& insn) {
             const char* sfx = insn.suffix == 1 ? "b" : insn.suffix == 2 ? "w" : insn.suffix == 8 ? "q" : "d";
             return std::string(base) + sfx;
         }
+        case Mnemonic::Movups: return "movups"; case Mnemonic::Movupd: return "movupd";
+        case Mnemonic::Movss: return "movss"; case Mnemonic::Movsd: return "movsd";
+        case Mnemonic::Movaps: return "movaps"; case Mnemonic::Movapd: return "movapd";
+        case Mnemonic::Movdqa: return "movdqa"; case Mnemonic::Movdqu: return "movdqu";
+        case Mnemonic::Movd: return "movd"; case Mnemonic::Movq: return "movq";
+        case Mnemonic::Pxor: return "pxor"; case Mnemonic::Xorps: return "xorps"; case Mnemonic::Xorpd: return "xorpd";
         default: return "(bad)";
     }
 }
@@ -118,8 +124,13 @@ std::string mnemStr(const Instruction& insn) {
 std::string formatIntel(const Instruction& insn) {
     std::string s;
     if (insn.prefixes.lock) s += "lock ";
-    if (insn.prefixes.rep == 0xF3) s += "rep ";
-    else if (insn.prefixes.rep == 0xF2) s += "repne ";
+    // rep/repne is only a real prefix on the string ops; on SSE, F3/F2 are mandatory
+    // prefixes that select the opcode, not a rep prefix to be printed.
+    const Mnemonic m = insn.mnemonic;
+    const bool strOp = m == Mnemonic::Movs || m == Mnemonic::Stos || m == Mnemonic::Lods ||
+                       m == Mnemonic::Scas || m == Mnemonic::Cmps;
+    if (strOp && insn.prefixes.rep == 0xF3) s += "rep ";
+    else if (strOp && insn.prefixes.rep == 0xF2) s += "repne ";
     s += mnemStr(insn);
     for (int i = 0; i < insn.operandCount; ++i) {
         s += (i == 0) ? " " : ", ";
