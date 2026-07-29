@@ -30,4 +30,9 @@ TEST_MAIN({
       CHECK(i.operands[0].reg.cls == RegClass::Gpr32); CHECK(i.operands[1].reg.cls == RegClass::Gpr8); }
     // invalid / truncated
     { DecodeResult r = decode((const uint8_t*)"\x48", 1, 0); CHECK(r.status == DecodeStatus::Truncated); }
+
+    // EFLAGS metadata
+    { Instruction i = dec({0x83, 0xC0, 0x05}); CHECK(i.flagsWritten & EF_CF); CHECK(i.flagsWritten & EF_ZF); CHECK(i.flagsWritten & EF_OF); }  // add
+    { Instruction i = dec({0x74, 0x05}); CHECK_EQ(int(i.flagsRead), int(EF_ZF)); CHECK_EQ(int(i.flagsWritten), 0); }                          // je reads ZF
+    { Instruction i = dec({0x31, 0xC0}); CHECK(i.flagsWritten & EF_ZF); CHECK_EQ(int(i.flagsRead), 0); CHECK(!(i.flagsWritten & EF_AF)); }    // xor: no AF, no read
 })

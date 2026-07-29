@@ -1,6 +1,7 @@
 #include "disasm64/disasm64.h"
 #include "prefix.h"
 #include "operand.h"
+#include <cstring>
 
 namespace disasm64 {
 namespace {
@@ -468,6 +469,43 @@ bool decodeVex(Reader& r, Instruction& insn) {
     }
 }
 
+uint8_t ccFlags(uint8_t cc) {
+    switch (cc & 0xE) {
+        case 0x0: return EF_OF;
+        case 0x2: return EF_CF;
+        case 0x4: return EF_ZF;
+        case 0x6: return EF_CF | EF_ZF;
+        case 0x8: return EF_SF;
+        case 0xA: return EF_PF;
+        case 0xC: return EF_SF | EF_OF;
+        case 0xE: return EF_ZF | EF_SF | EF_OF;
+    }
+    return 0;
+}
+
+void setFlags(Instruction& in) {
+    const uint8_t ARITH = EF_CF | EF_PF | EF_AF | EF_ZF | EF_SF | EF_OF;
+    switch (in.mnemonic) {
+        case M::Add: case M::Sub: case M::Cmp: case M::Neg: in.flagsWritten = ARITH; break;
+        case M::Adc: case M::Sbb: in.flagsWritten = ARITH; in.flagsRead = EF_CF; break;
+        case M::And: case M::Or: case M::Xor: case M::Test: in.flagsWritten = EF_CF | EF_OF | EF_PF | EF_ZF | EF_SF; break;
+        case M::Inc: case M::Dec: in.flagsWritten = EF_PF | EF_AF | EF_ZF | EF_SF | EF_OF; break;
+        case M::Shl: case M::Shr: case M::Sar: case M::Rol: case M::Ror: case M::Rcl: case M::Rcr: in.flagsWritten = EF_CF | EF_OF | EF_PF | EF_ZF | EF_SF; break;
+        case M::Imul: case M::Mul: case M::Idiv: case M::Div: in.flagsWritten = EF_CF | EF_OF; break;
+        case M::Jcc: case M::Setcc: case M::Cmovcc: in.flagsRead = ccFlags(in.cc); break;
+        case M::Cmc: case M::Clc: case M::Stc: in.flagsWritten = EF_CF; break;
+        case M::Cld: case M::Std: in.flagsWritten = EF_DF; break;
+        case M::Bt: case M::Bts: case M::Btr: case M::Btc: in.flagsWritten = EF_CF; break;
+        case M::Ucomiss: case M::Ucomisd: case M::Comiss: case M::Comisd: in.flagsWritten = EF_ZF | EF_PF | EF_CF; break;
+        default: break;
+    }
+    if (in.rawName) {
+        const char* r = in.rawName;
+        if (!std::strcmp(r, "bsf") || !std::strcmp(r, "bsr") || !std::strcmp(r, "popcnt") || !std::strcmp(r, "tzcnt") || !std::strcmp(r, "lzcnt")) in.flagsWritten = EF_ZF | EF_CF | EF_PF | EF_SF | EF_OF;
+        else if (!std::strcmp(r, "ptest")) in.flagsWritten = EF_ZF | EF_CF;
+    }
+}
+
 void finalize(Reader& r, Instruction& insn) {
     insn.length = uint8_t(r.pos > 255 ? 255 : r.pos);
     for (int i = 0; i < insn.operandCount; ++i) {
@@ -475,6 +513,7 @@ void finalize(Reader& r, Instruction& insn) {
         if (o.kind == OperandKind::Rel) { o.relTarget = insn.address + insn.length + uint64_t(o.imm); insn.positionDependent = true; }
         else if (o.kind == OperandKind::Mem && o.mem.ripRelative) { o.mem.ripTarget = insn.address + insn.length + uint64_t(o.mem.disp); insn.positionDependent = true; }
     }
+    setFlags(insn);
 }
 
 } // namespace

@@ -85,6 +85,8 @@ enum class Mnemonic : uint16_t {
     Count
 };
 
+enum EFlag : uint8_t { EF_CF = 1, EF_PF = 2, EF_AF = 4, EF_ZF = 8, EF_SF = 16, EF_OF = 32, EF_DF = 64 };
+
 enum class DecodeStatus : uint8_t { Ok, Invalid, Truncated };
 
 struct Instruction {
@@ -98,6 +100,8 @@ struct Instruction {
     Prefixes prefixes;
     bool positionDependent = false;
     const char* rawName = nullptr;   // SIMD leaf ops set this instead of a Mnemonic
+    uint8_t flagsRead = 0;           // EFlag bitmask
+    uint8_t flagsWritten = 0;
 };
 
 struct DecodeResult {

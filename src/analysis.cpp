@@ -3,6 +3,18 @@
 
 namespace disasm64 {
 
+std::string flagsToString(uint8_t f) {
+    std::string s;
+    if (f & EF_CF) s += 'c';
+    if (f & EF_PF) s += 'p';
+    if (f & EF_AF) s += 'a';
+    if (f & EF_ZF) s += 'z';
+    if (f & EF_SF) s += 's';
+    if (f & EF_OF) s += 'o';
+    if (f & EF_DF) s += 'd';
+    return s;
+}
+
 std::vector<const char*> analyzeEncoding(const uint8_t* p, size_t n, uint64_t address) {
     std::vector<const char*> out;
     bool seen[256] = {}; int segCount = 0, repCount = 0, rexCount = 0; bool afterRex = false;

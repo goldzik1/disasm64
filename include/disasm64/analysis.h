@@ -1,9 +1,13 @@
 #pragma once
 #include "types.h"
 #include <vector>
+#include <string>
 #include <cstdint>
 
 namespace disasm64 {
+
+// EFLAGS bitmask -> letters (cpazso d).
+std::string flagsToString(uint8_t flags);
 
 // Encoding quirks of one instruction: redundant prefixes, over-long forms — signals of
 // obfuscation, watermarking, or hand-crafted code that a plain disassembler won't show.
