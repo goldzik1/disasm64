@@ -148,6 +148,16 @@ std::string mnemStr(const Instruction& insn) {
                                           "pmovmskb", "unpcklps", "unpcklpd", "unpckhps", "unpckhpd"};
                 return n[int(m) - int(Mnemonic::Pshufd)];
             }
+            if (m >= Mnemonic::Minps && m <= Mnemonic::Maxsd) {
+                static const char* base[] = {"min", "max"};
+                static const char* sfx[] = {"ps", "pd", "ss", "sd"};
+                int i = int(m) - int(Mnemonic::Minps);
+                return std::string(base[i / 4]) + sfx[i % 4];
+            }
+            if (m >= Mnemonic::Cmpps && m <= Mnemonic::Cmpsd) {
+                static const char* n[] = {"cmpps", "cmppd", "cmpss", "cmpsd"};
+                return n[int(m) - int(Mnemonic::Cmpps)];
+            }
             return "(bad)";
         }
     }

@@ -71,6 +71,7 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op >= 0xC8 && op <= 0xCF) { insn.mnemonic = M::Bswap; addOp(insn, regOp(makeGpr((op - 0xC8) | (p.rexB ? 8 : 0), SZv(p), p.rex))); return true; }
 
     const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;   // mandatory prefix
+    const int sc = pp == 2 ? 4 : pp == 3 ? 8 : 16;   // scalar/packed mem size
     auto xmm = [](int idx) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = RegClass::Xmm; o.reg.idx = uint8_t(idx); o.sizeBytes = 16; return o; };
     auto vecEG = [&](int memSz, bool store) {
         Operand rm; int reg = decodeModRM(r, p, memSz, rm, RegClass::Xmm);
@@ -85,6 +86,9 @@ bool decode0F(Reader& r, Instruction& insn) {
         case 0x5C: sseArith(M::Subps); return true;
         case 0x5E: sseArith(M::Divps); return true;
         case 0x51: sseArith(M::Sqrtps); return true;
+        case 0x5D: insn.mnemonic = M(int(M::Minps) + pp); vecEG(sc, false); return true;
+        case 0x5F: insn.mnemonic = M(int(M::Maxps) + pp); vecEG(sc, false); return true;
+        case 0xC2: { insn.mnemonic = M(int(M::Cmpps) + pp); Operand rm; int reg = decodeModRM(r, p, sc, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
         case 0x14: if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Unpcklpd : M::Unpcklps; vecEG(16, false); return true;
         case 0x15: if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Unpckhpd : M::Unpckhps; vecEG(16, false); return true;
         case 0x50: { if (pp >= 2) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 1 ? M::Movmskpd : M::Movmskps; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); return true; }

@@ -79,6 +79,8 @@ enum class Mnemonic : uint16_t {
     Pcmpeqb, Pcmpeqw, Pcmpeqd, Pcmpgtb, Pcmpgtw, Pcmpgtd,
     Pshufd, Pshuflw, Pshufhw, Shufps, Shufpd, Movmskps, Movmskpd, Pmovmskb,
     Unpcklps, Unpcklpd, Unpckhps, Unpckhpd,
+    Minps, Minpd, Minss, Minsd, Maxps, Maxpd, Maxss, Maxsd,
+    Cmpps, Cmppd, Cmpss, Cmpsd,
     Count
 };
 
