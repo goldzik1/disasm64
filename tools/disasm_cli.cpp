@@ -2,6 +2,7 @@
 #include "disasm64/disasm64.h"
 #include "disasm64/analysis.h"
 #include "disasm64/loader.h"
+#include "disasm64/image.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -51,11 +52,17 @@ static void emit(const uint8_t* code, size_t n, uint64_t base, bool att, bool sh
 int main(int argc, char** argv) {
     uint64_t base = 0x1000;
     bool showFlags = false, att = false, showSem = false;
+    bool doImports = false, doExports = false, doStrings = false;
     const char* filePath = nullptr;
+    const char* pattern = nullptr;
     std::vector<uint8_t> code;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--base") && i + 1 < argc) { base = std::strtoull(argv[++i], nullptr, 0); continue; }
         if (!std::strcmp(argv[i], "--file") && i + 1 < argc) { filePath = argv[++i]; continue; }
+        if (!std::strcmp(argv[i], "--pattern") && i + 1 < argc) { pattern = argv[++i]; continue; }
+        if (!std::strcmp(argv[i], "--imports")) { doImports = true; continue; }
+        if (!std::strcmp(argv[i], "--exports")) { doExports = true; continue; }
+        if (!std::strcmp(argv[i], "--strings")) { doStrings = true; continue; }
         if (!std::strcmp(argv[i], "--flags")) { showFlags = true; continue; }
         if (!std::strcmp(argv[i], "--att")) { att = true; continue; }
         if (!std::strcmp(argv[i], "--sem")) { showSem = true; continue; }
@@ -73,6 +80,24 @@ int main(int argc, char** argv) {
         std::printf("; %s  %s  imagebase %llx  entry %llx\n", im.format.c_str(),
                     im.machine.empty() ? "?" : im.machine.c_str(),
                     (unsigned long long)im.imageBase, (unsigned long long)im.entry);
+        if (doImports) {
+            for (const Import& ip : parseImports(im))
+                if (ip.name.empty()) std::printf("%016llx  %s : #%u\n", (unsigned long long)ip.iatVa, ip.dll.c_str(), ip.ordinal);
+                else std::printf("%016llx  %s : %s\n", (unsigned long long)ip.iatVa, ip.dll.c_str(), ip.name.c_str());
+            return 0;
+        }
+        if (doExports) {
+            for (const Export& e : parseExports(im)) std::printf("%016llx  #%u  %s\n", (unsigned long long)e.va, e.ordinal, e.name.c_str());
+            return 0;
+        }
+        if (doStrings) {
+            for (const FoundString& s : findStrings(im)) std::printf("%016llx  %s%s\n", (unsigned long long)s.va, s.wide ? "L" : "", s.text.c_str());
+            return 0;
+        }
+        if (pattern) {
+            for (const Match& m : patternSearch(im, pattern)) std::printf("%016llx\n", (unsigned long long)m.va);
+            return 0;
+        }
         for (const CodeRegion& rg : im.code) {
             std::printf("\n; section %s  va %llx  size %llx\n", rg.name.c_str(),
                         (unsigned long long)rg.vaddr, (unsigned long long)rg.size);

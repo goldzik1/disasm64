@@ -216,23 +216,82 @@ struct CodeRegion {
     std::string name;         // section name, or "raw"
 };
 
-struct LoadedImage {
-    std::vector<uint8_t> file;
-    std::vector<CodeRegion> code;   // executable sections (or the whole file for raw input)
-    uint64_t imageBase = 0;
-    uint64_t entry = 0;             // entry-point virtual address (0 if unknown)
-    bool isPE = false;
-    std::string format;             // "PE32+", "PE32", "raw"
-    std::string machine;            // "x86-64", "x86", or ""
+// Every section of the mapped image (used for RVA translation and data scans).
+struct Section {
+    std::string name;
+    uint64_t vaddr = 0;
+    uint32_t vsize = 0;
+    size_t   fileOffset = 0;
+    uint32_t rawSize = 0;
+    bool     exec = false;
 };
 
-// Parse a file image. Recognises PE (MZ/PE) and pulls out its executable sections at the
-// right virtual addresses; anything else is treated as a raw code blob at address 0.
+struct LoadedImage {
+    std::vector<uint8_t> file;
+    std::vector<Section> sections;   // all sections
+    std::vector<CodeRegion> code;    // executable subset, ready to disassemble
+    uint64_t imageBase = 0;
+    uint64_t entry = 0;              // entry-point virtual address (0 if unknown)
+    bool isPE = false;
+    bool isELF = false;
+    std::string format;             // "PE32+", "PE32", "ELF64", "raw"
+    std::string machine;            // "x86-64", "x86", or ""
+    uint32_t importRva = 0, importSize = 0;   // PE import directory
+    uint32_t exportRva = 0, exportSize = 0;   // PE export directory
+};
+
+// Parse a file image. Recognises PE (MZ/PE) and ELF64, pulling out executable sections at
+// their virtual addresses; anything else is treated as a raw code blob at address 0.
 LoadedImage loadImage(std::vector<uint8_t> fileBytes);
 
 inline const uint8_t* regionData(const LoadedImage& im, const CodeRegion& r) {
     return im.file.data() + r.fileOffset;
 }
+
+// Translate a virtual address to a file offset (SIZE_MAX if it maps to no section's raw data).
+size_t vaToOffset(const LoadedImage& im, uint64_t va);
+
+} // namespace disasm64
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace disasm64 {
+
+struct Import {
+    std::string dll;
+    std::string name;     // empty when imported by ordinal
+    uint16_t ordinal = 0;
+    uint64_t iatVa = 0;   // slot in the import address table
+};
+
+struct Export {
+    std::string name;
+    uint64_t va = 0;
+    uint32_t ordinal = 0;
+};
+
+struct FoundString {
+    uint64_t va = 0;
+    std::string text;
+    bool wide = false;    // UTF-16LE
+};
+
+struct Match {
+    uint64_t va = 0;
+    size_t fileOffset = 0;
+};
+
+// PE import / export tables (empty for non-PE or when the directory is absent).
+std::vector<Import> parseImports(const LoadedImage& im);
+std::vector<Export> parseExports(const LoadedImage& im);
+
+// Printable ASCII and UTF-16LE runs of at least minLen, with their virtual addresses.
+std::vector<FoundString> findStrings(const LoadedImage& im, size_t minLen = 4);
+
+// IDA-style byte-pattern search over the mapped sections. "?" / "??" are wildcard bytes,
+// e.g. "48 8B ?? C0". Returns every match's address.
+std::vector<Match> patternSearch(const LoadedImage& im, const std::string& pattern);
 
 } // namespace disasm64
 #include <string>
@@ -2281,35 +2340,36 @@ struct View {
     const uint8_t* p;
     size_t n;
     bool ok = true;
-    uint16_t u16(size_t off) { if (off + 2 > n) { ok = false; return 0; } return uint16_t(p[off] | (p[off + 1] << 8)); }
-    uint32_t u32(size_t off) {
-        if (off + 4 > n) { ok = false; return 0; }
-        return uint32_t(p[off]) | (uint32_t(p[off + 1]) << 8) | (uint32_t(p[off + 2]) << 16) | (uint32_t(p[off + 3]) << 24);
+    uint16_t u16(size_t o) { if (o + 2 > n) { ok = false; return 0; } return uint16_t(p[o] | (p[o + 1] << 8)); }
+    uint32_t u32(size_t o) {
+        if (o + 4 > n) { ok = false; return 0; }
+        return uint32_t(p[o]) | (uint32_t(p[o + 1]) << 8) | (uint32_t(p[o + 2]) << 16) | (uint32_t(p[o + 3]) << 24);
     }
-    uint64_t u64(size_t off) { if (off + 8 > n) { ok = false; return 0; } return uint64_t(u32(off)) | (uint64_t(u32(off + 4)) << 32); }
+    uint64_t u64(size_t o) { if (o + 8 > n) { ok = false; return 0; } return uint64_t(u32(o)) | (uint64_t(u32(o + 4)) << 32); }
 };
 
-} // namespace
+void deriveCode(LoadedImage& im) {
+    for (const Section& s : im.sections)
+        if (s.exec && s.rawSize) im.code.push_back({s.fileOffset, s.rawSize, s.vaddr, s.name});
+    if (im.code.empty() && !im.sections.empty())
+        im.code.push_back({im.sections[0].fileOffset, im.sections[0].rawSize, im.sections[0].vaddr, im.sections[0].name});
+}
 
-LoadedImage loadImage(std::vector<uint8_t> fileBytes) {
+LoadedImage raw(std::vector<uint8_t> file) {
     LoadedImage im;
-    im.file = std::move(fileBytes);
+    im.file = std::move(file);
+    im.format = "raw";
+    im.sections.push_back({"raw", 0, uint32_t(im.file.size()), 0, uint32_t(im.file.size()), true});
+    im.code.push_back({0, im.file.size(), 0, "raw"});
+    return im;
+}
+
+LoadedImage loadPE(std::vector<uint8_t> file, uint32_t peOff) {
+    LoadedImage im;
+    im.file = std::move(file);
+    im.isPE = true;
     View v{im.file.data(), im.file.size()};
 
-    // Not a PE -> treat the whole thing as raw code.
-    if (im.file.size() < 0x40 || v.u16(0) != 0x5A4D /* 'MZ' */) {
-        im.format = "raw";
-        im.code.push_back({0, im.file.size(), 0, "raw"});
-        return im;
-    }
-    uint32_t peOff = v.u32(0x3C);
-    if (!v.ok || peOff + 24 > im.file.size() || v.u32(peOff) != 0x00004550 /* 'PE\0\0' */) {
-        im.format = "raw";
-        im.code.push_back({0, im.file.size(), 0, "raw"});
-        return im;
-    }
-
-    im.isPE = true;
     uint16_t machine = v.u16(peOff + 4);
     im.machine = machine == 0x8664 ? "x86-64" : machine == 0x14C ? "x86" : "";
     uint16_t numSections = v.u16(peOff + 6);
@@ -2317,32 +2377,268 @@ LoadedImage loadImage(std::vector<uint8_t> fileBytes) {
     size_t opt = peOff + 24;
     uint16_t magic = v.u16(opt);
     uint32_t entryRva = v.u32(opt + 16);
-    if (magic == 0x20B) { im.format = "PE32+"; im.imageBase = v.u64(opt + 24); }
-    else { im.format = "PE32"; im.imageBase = v.u32(opt + 28); }
+    size_t dd;
+    if (magic == 0x20B) { im.format = "PE32+"; im.imageBase = v.u64(opt + 24); dd = opt + 112; }
+    else { im.format = "PE32"; im.imageBase = v.u32(opt + 28); dd = opt + 96; }
     im.entry = entryRva ? im.imageBase + entryRva : 0;
+    im.exportRva = v.u32(dd);      im.exportSize = v.u32(dd + 4);
+    im.importRva = v.u32(dd + 8);  im.importSize = v.u32(dd + 12);
 
     size_t sec = opt + optSize;
     for (uint16_t i = 0; i < numSections && v.ok; ++i, sec += 40) {
-        char name[9] = {};
         if (sec + 40 > im.file.size()) break;
+        char name[9] = {};
         std::memcpy(name, im.file.data() + sec, 8);
-        uint32_t vsize = v.u32(sec + 8);
-        uint32_t rva   = v.u32(sec + 12);
-        uint32_t rawSz = v.u32(sec + 16);
-        uint32_t rawPtr = v.u32(sec + 20);
-        uint32_t chars = v.u32(sec + 36);
-        bool exec = (chars & 0x20000000u) || (chars & 0x00000020u);   // MEM_EXECUTE | CNT_CODE
-        if (!exec || !rawPtr || !rawSz) continue;
+        uint32_t vsize = v.u32(sec + 8), rva = v.u32(sec + 12);
+        uint32_t rawSz = v.u32(sec + 16), rawPtr = v.u32(sec + 20), chars = v.u32(sec + 36);
+        bool exec = (chars & 0x20000000u) || (chars & 0x00000020u);
         size_t size = rawSz;
-        if (vsize && vsize < size) size = vsize;               // trim to the mapped size
-        if (rawPtr >= im.file.size()) continue;
-        if (rawPtr + size > im.file.size()) size = im.file.size() - rawPtr;
-        im.code.push_back({rawPtr, size, im.imageBase + rva, name[0] ? name : "sect"});
+        if (rawPtr >= im.file.size()) { rawPtr = 0; size = 0; }
+        else if (rawPtr + size > im.file.size()) size = im.file.size() - rawPtr;
+        im.sections.push_back({name[0] ? name : "sect", im.imageBase + rva, vsize, rawPtr, uint32_t(size), exec});
     }
-
-    if (im.code.empty())   // no executable section found -> fall back to the whole file
-        im.code.push_back({0, im.file.size(), im.imageBase, "image"});
+    deriveCode(im);
     return im;
+}
+
+LoadedImage loadELF(std::vector<uint8_t> file) {
+    LoadedImage im;
+    im.file = std::move(file);
+    im.isELF = true;
+    im.format = "ELF64";
+    View v{im.file.data(), im.file.size()};
+
+    uint16_t machine = v.u16(0x12);
+    im.machine = machine == 0x3E ? "x86-64" : machine == 0x03 ? "x86" : "";
+    im.entry = v.u64(0x18);
+    uint64_t shoff = v.u64(0x28);
+    uint16_t shentsize = v.u16(0x3A), shnum = v.u16(0x3C), shstrndx = v.u16(0x3E);
+
+    size_t strtabOff = 0;
+    if (shstrndx < shnum) {
+        size_t sh = size_t(shoff) + size_t(shstrndx) * shentsize;
+        strtabOff = size_t(v.u64(sh + 24));
+    }
+    for (uint16_t i = 0; i < shnum && v.ok; ++i) {
+        size_t sh = size_t(shoff) + size_t(i) * shentsize;
+        if (sh + 64 > im.file.size()) break;
+        uint32_t nameOff = v.u32(sh);
+        uint64_t flags = v.u64(sh + 8);
+        uint64_t addr = v.u64(sh + 16);
+        uint64_t off = v.u64(sh + 24);
+        uint64_t size = v.u64(sh + 32);
+        if (!(flags & 0x2 /*SHF_ALLOC*/) || !addr || !size) continue;
+        std::string name = "sect";
+        if (strtabOff && strtabOff + nameOff < im.file.size()) {
+            const char* s = reinterpret_cast<const char*>(im.file.data() + strtabOff + nameOff);
+            size_t maxLen = im.file.size() - (strtabOff + nameOff);
+            name.assign(s, strnlen(s, maxLen));
+        }
+        size_t rawPtr = size_t(off), rawSz = size_t(size);
+        if (rawPtr > im.file.size()) rawSz = 0;
+        else if (rawPtr + rawSz > im.file.size()) rawSz = im.file.size() - rawPtr;
+        im.sections.push_back({name, addr, uint32_t(size), rawPtr, uint32_t(rawSz), (flags & 0x4 /*SHF_EXECINSTR*/) != 0});
+    }
+    deriveCode(im);
+    return im;
+}
+
+} // namespace
+
+LoadedImage loadImage(std::vector<uint8_t> fileBytes) {
+    View v{fileBytes.data(), fileBytes.size()};
+    if (fileBytes.size() >= 0x40 && v.u16(0) == 0x5A4D) {          // 'MZ'
+        uint32_t peOff = v.u32(0x3C);
+        if (v.ok && peOff + 24 <= fileBytes.size() && v.u32(peOff) == 0x00004550)  // 'PE\0\0'
+            return loadPE(std::move(fileBytes), peOff);
+    }
+    if (fileBytes.size() >= 64 && fileBytes[0] == 0x7F && fileBytes[1] == 'E' &&
+        fileBytes[2] == 'L' && fileBytes[3] == 'F' && fileBytes[4] == 2 /*ELFCLASS64*/)
+        return loadELF(std::move(fileBytes));
+    return raw(std::move(fileBytes));
+}
+
+size_t vaToOffset(const LoadedImage& im, uint64_t va) {
+    for (const Section& s : im.sections) {
+        uint64_t span = s.vsize > s.rawSize ? s.vsize : s.rawSize;
+        if (va >= s.vaddr && va < s.vaddr + span) {
+            uint64_t d = va - s.vaddr;
+            if (d < s.rawSize) return s.fileOffset + size_t(d);
+        }
+    }
+    return SIZE_MAX;
+}
+
+} // namespace disasm64
+#include <cstring>
+
+namespace disasm64 {
+namespace {
+
+struct ImgView {
+    const uint8_t* p; size_t n;
+    uint16_t u16(size_t o) const { return o + 2 <= n ? uint16_t(p[o] | (p[o + 1] << 8)) : 0; }
+    uint32_t u32(size_t o) const {
+        return o + 4 <= n ? uint32_t(p[o]) | (uint32_t(p[o + 1]) << 8) | (uint32_t(p[o + 2]) << 16) | (uint32_t(p[o + 3]) << 24) : 0;
+    }
+    uint64_t u64(size_t o) const { return uint64_t(u32(o)) | (uint64_t(u32(o + 4)) << 32); }
+};
+
+// Read a NUL-terminated string at a virtual address.
+std::string cstrAt(const LoadedImage& im, uint64_t va) {
+    size_t off = vaToOffset(im, va);
+    if (off == SIZE_MAX) return {};
+    size_t max = im.file.size() - off;
+    const char* s = reinterpret_cast<const char*>(im.file.data() + off);
+    return std::string(s, ::strnlen(s, max));
+}
+
+bool printable(uint8_t c) { return c >= 0x20 && c <= 0x7E; }
+
+} // namespace
+
+std::vector<Import> parseImports(const LoadedImage& im) {
+    std::vector<Import> out;
+    if (!im.isPE || !im.importRva) return out;
+    bool pe32plus = im.format == "PE32+";
+    int ptr = pe32plus ? 8 : 4;
+    uint64_t ordFlag = pe32plus ? 0x8000000000000000ull : 0x80000000ull;
+    ImgView v{im.file.data(), im.file.size()};
+
+    for (uint32_t d = 0;; d += 20) {
+        size_t desc = vaToOffset(im, im.imageBase + im.importRva + d);
+        if (desc == SIZE_MAX) break;
+        uint32_t iltRva = v.u32(desc);
+        uint32_t nameRva = v.u32(desc + 12);
+        uint32_t iatRva = v.u32(desc + 16);
+        if (!nameRva && !iatRva && !iltRva) break;
+        std::string dll = cstrAt(im, im.imageBase + nameRva);
+        uint32_t walkRva = iltRva ? iltRva : iatRva;
+        for (uint32_t i = 0;; ++i) {
+            size_t th = vaToOffset(im, im.imageBase + walkRva + i * ptr);
+            if (th == SIZE_MAX) break;
+            uint64_t thunk = pe32plus ? v.u64(th) : v.u32(th);
+            if (!thunk) break;
+            Import imp;
+            imp.dll = dll;
+            imp.iatVa = im.imageBase + iatRva + uint64_t(i) * ptr;
+            if (thunk & ordFlag) imp.ordinal = uint16_t(thunk & 0xFFFF);
+            else imp.name = cstrAt(im, im.imageBase + uint32_t(thunk) + 2);   // skip the hint word
+            out.push_back(std::move(imp));
+            if (out.size() > 100000) return out;
+        }
+    }
+    return out;
+}
+
+std::vector<Export> parseExports(const LoadedImage& im) {
+    std::vector<Export> out;
+    if (!im.isPE || !im.exportRva) return out;
+    ImgView v{im.file.data(), im.file.size()};
+    size_t dir = vaToOffset(im, im.imageBase + im.exportRva);
+    if (dir == SIZE_MAX) return out;
+    uint32_t ordBase = v.u32(dir + 16);
+    uint32_t nFuncs = v.u32(dir + 20);
+    uint32_t nNames = v.u32(dir + 24);
+    uint32_t funcsRva = v.u32(dir + 28);
+    uint32_t namesRva = v.u32(dir + 32);
+    uint32_t ordsRva = v.u32(dir + 36);
+    if (nNames > 1000000 || nFuncs > 1000000) return out;
+
+    for (uint32_t i = 0; i < nNames; ++i) {
+        size_t namePtr = vaToOffset(im, im.imageBase + namesRva + i * 4);
+        size_t ordPtr = vaToOffset(im, im.imageBase + ordsRva + i * 2);
+        if (namePtr == SIZE_MAX || ordPtr == SIZE_MAX) break;
+        uint32_t nameRva = v.u32(namePtr);
+        uint16_t ord = v.u16(ordPtr);
+        if (ord >= nFuncs) continue;
+        size_t fnPtr = vaToOffset(im, im.imageBase + funcsRva + uint32_t(ord) * 4);
+        if (fnPtr == SIZE_MAX) continue;
+        uint32_t fnRva = v.u32(fnPtr);
+        Export e;
+        e.name = cstrAt(im, im.imageBase + nameRva);
+        e.va = fnRva ? im.imageBase + fnRva : 0;
+        e.ordinal = ordBase + ord;
+        out.push_back(std::move(e));
+    }
+    return out;
+}
+
+std::vector<FoundString> findStrings(const LoadedImage& im, size_t minLen) {
+    std::vector<FoundString> out;
+    const uint8_t* base = im.file.data();
+    for (const Section& s : im.sections) {
+        if (s.exec) continue;   // strings live in data sections; code produces only noise
+        const uint8_t* d = base + s.fileOffset;
+        size_t n = s.rawSize;
+        for (size_t i = 0; i < n;) {
+            // ASCII run
+            size_t j = i;
+            while (j < n && printable(d[j])) ++j;
+            if (j - i >= minLen) {
+                FoundString fs;
+                fs.va = s.vaddr + i;
+                fs.text.assign(reinterpret_cast<const char*>(d + i), j - i);
+                out.push_back(std::move(fs));
+                i = j;
+                continue;
+            }
+            // UTF-16LE run (char, 0x00 pairs)
+            size_t k = i, cnt = 0;
+            std::string w;
+            while (k + 1 < n && printable(d[k]) && d[k + 1] == 0) { w += char(d[k]); k += 2; ++cnt; }
+            if (cnt >= minLen) {
+                FoundString fs; fs.va = s.vaddr + i; fs.text = std::move(w); fs.wide = true;
+                out.push_back(std::move(fs));
+                i = k;
+                continue;
+            }
+            ++i;
+        }
+        if (out.size() > 200000) break;
+    }
+    return out;
+}
+
+std::vector<Match> patternSearch(const LoadedImage& im, const std::string& pattern) {
+    std::vector<Match> out;
+    std::vector<uint8_t> bytes;
+    std::vector<bool> wild;
+    for (size_t i = 0; i < pattern.size();) {
+        char c = pattern[i];
+        if (c == ' ') { ++i; continue; }
+        if (c == '?') { wild.push_back(true); bytes.push_back(0); while (i < pattern.size() && pattern[i] == '?') ++i; continue; }
+        auto hv = [](char x) -> int {
+            if (x >= '0' && x <= '9') return x - '0';
+            if (x >= 'a' && x <= 'f') return x - 'a' + 10;
+            if (x >= 'A' && x <= 'F') return x - 'A' + 10;
+            return -1;
+        };
+        int hi = hv(c);
+        if (hi < 0 || i + 1 >= pattern.size()) return out;   // malformed
+        int lo = hv(pattern[i + 1]);
+        if (lo < 0) return out;
+        bytes.push_back(uint8_t(hi * 16 + lo)); wild.push_back(false);
+        i += 2;
+    }
+    if (bytes.empty()) return out;
+
+    const uint8_t* fb = im.file.data();
+    for (const Section& s : im.sections) {
+        const uint8_t* d = fb + s.fileOffset;
+        size_t n = s.rawSize;
+        if (n < bytes.size()) continue;
+        for (size_t i = 0; i + bytes.size() <= n; ++i) {
+            bool hit = true;
+            for (size_t j = 0; j < bytes.size(); ++j)
+                if (!wild[j] && d[i + j] != bytes[j]) { hit = false; break; }
+            if (hit) {
+                out.push_back({s.vaddr + i, s.fileOffset + i});
+                if (out.size() > 100000) return out;
+            }
+        }
+    }
+    return out;
 }
 
 } // namespace disasm64
