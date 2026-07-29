@@ -384,6 +384,7 @@ bool decode0F(Reader& r, Instruction& insn) {
 
 bool decodeX87(Reader& r, Instruction& insn, uint8_t op) {
     const Prefixes& p = insn.prefixes;
+    insn.category = Category::X87;
     auto st = [](int i) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = RegClass::St; o.reg.idx = uint8_t(i & 7); o.sizeBytes = 10; return o; };
     uint8_t m = r.peek();
     int mod = m >> 6, reg = (m >> 3) & 7, rm = m & 7;
@@ -913,6 +914,81 @@ bool lockLegal(const Instruction& in) {   // LOCK needs a memory destination and
     return false;
 }
 
+bool isSystemName(const char* r) {
+    static const char* sys[] = {
+        "swapgs","rdtscp","wrmsr","rdmsr","rdpmc","clts","invd","wbinvd","invlpg","getsec",
+        "sgdt","sidt","lgdt","lidt","sldt","lldt","str","ltr","smsw","lmsw","rsm",
+        "lar","lsl","sysenter","sysexit","sysret","vmread","vmwrite","vmcall","vmlaunch",
+        "vmresume","vmxoff","monitor","mwait","clac","stac","xgetbv","xsetbv","encls","enclu",
+        "enclv","rdfsbase","rdgsbase","wrfsbase","wrgsbase","lgs","lfs","lss","in","out",
+    };
+    for (const char* s : sys) if (!std::strcmp(r, s)) return true;
+    return false;
+}
+
+void setSemantics(Instruction& in) {
+    using A = OperandAccess;
+    auto set = [&](int i, A a) { if (i < in.operandCount) in.operands[i].access = a; };
+    const M m = in.mnemonic;
+
+    // default: SIMD / raw-name ops write their first operand and read the rest
+    bool simd = in.rawName || (m >= M::Movups && m <= M::Cmpsd);
+    if (simd) for (int i = 0; i < in.operandCount; ++i) set(i, i == 0 ? A::Write : A::Read);
+
+    switch (m) {
+        case M::Add: case M::Or: case M::Adc: case M::Sbb: case M::And: case M::Sub: case M::Xor:
+            set(0, A::ReadWrite); set(1, A::Read); break;
+        case M::Cmp: case M::Test: set(0, A::Read); set(1, A::Read); break;
+        case M::Mov: case M::Movzx: case M::Movsx: case M::Movsxd: case M::Lea:
+            set(0, A::Write); set(1, A::Read); break;
+        case M::Inc: case M::Dec: case M::Neg: case M::Not: set(0, A::ReadWrite); break;
+        case M::Shl: case M::Shr: case M::Sar: case M::Rol: case M::Ror: case M::Rcl: case M::Rcr:
+            set(0, A::ReadWrite); set(1, A::Read); break;
+        case M::Push: set(0, A::Read); break;
+        case M::Pop: set(0, A::Write); break;
+        case M::Xchg: set(0, A::ReadWrite); set(1, A::ReadWrite); break;
+        case M::Imul:
+            if (in.operandCount == 3) { set(0, A::Write); set(1, A::Read); set(2, A::Read); }
+            else if (in.operandCount == 2) { set(0, A::ReadWrite); set(1, A::Read); }
+            else set(0, A::Read);
+            break;
+        case M::Mul: case M::Div: case M::Idiv: set(0, A::Read); break;
+        case M::Setcc: set(0, A::Write); break;
+        case M::Cmovcc: set(0, A::Write); set(1, A::Read); break;
+        case M::Jmp: case M::Call: set(0, A::Read); break;
+        case M::Bt: set(0, A::Read); set(1, A::Read); break;
+        case M::Bts: case M::Btr: case M::Btc: set(0, A::ReadWrite); set(1, A::Read); break;
+        case M::Bswap: set(0, A::ReadWrite); break;
+        case M::Xadd: set(0, A::ReadWrite); set(1, A::ReadWrite); break;
+        case M::Cmpxchg: set(0, A::ReadWrite); set(1, A::Read); break;
+        case M::Ucomiss: case M::Ucomisd: case M::Comiss: case M::Comisd: set(0, A::Read); set(1, A::Read); break;
+        default: break;
+    }
+    if (in.rawName && (std::strstr(in.rawName, "comi") || std::strstr(in.rawName, "ptest") || std::strstr(in.rawName, "ucomi")))
+        for (int i = 0; i < in.operandCount; ++i) set(i, A::Read);
+
+    // category (respect one already set during decode, e.g. x87)
+    if (in.category == Category::Unknown) {
+        Category c = Category::Gpr;
+        if (in.prefixes.evex) c = Category::Avx512;
+        else if (in.prefixes.vex) c = Category::Avx;
+        else if (m >= M::Movups && m <= M::Cmpsd) c = Category::Sse;
+        else if (in.rawName && isSystemName(in.rawName)) c = Category::System;
+        else if (in.rawName && (in.rawName[0] == 'v' || in.rawName[0] == 'p' || std::strstr(in.rawName, "movdq") ||
+                 std::strstr(in.rawName, "cvt") || std::strstr(in.rawName, "sqrt") || std::strstr(in.rawName, "shuf")))
+            c = Category::Sse;
+        switch (m) {
+            case M::Jmp: case M::Jcc: case M::Call: case M::Ret: c = Category::Branch; break;
+            case M::Push: case M::Pop: case M::Leave: case M::Pushf: case M::Popf: c = Category::Stack; break;
+            case M::Movs: case M::Stos: case M::Lods: case M::Scas: case M::Cmps: c = Category::String; break;
+            case M::Nop: c = Category::Nop; break;
+            case M::Cli: case M::Sti: case M::Hlt: case M::Cpuid: case M::Rdtsc: case M::Syscall: c = Category::System; break;
+            default: break;
+        }
+        in.category = c;
+    }
+}
+
 void finalize(Reader& r, Instruction& insn) {
     insn.length = uint8_t(r.pos > 255 ? 255 : r.pos);
     for (int i = 0; i < insn.operandCount; ++i) {
@@ -921,6 +997,7 @@ void finalize(Reader& r, Instruction& insn) {
         else if (o.kind == OperandKind::Mem && o.mem.ripRelative) { o.mem.ripTarget = insn.address + insn.length + uint64_t(o.mem.disp); insn.positionDependent = true; }
     }
     setFlags(insn);
+    setSemantics(insn);
 }
 
 } // namespace
@@ -943,6 +1020,7 @@ DecodeResult decode(const uint8_t* p, size_t n, uint64_t address) {
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
     if (!handled || (insn.mnemonic == M::Invalid && insn.rawName == nullptr)) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
     if (insn.prefixes.lock && !lockLegal(insn)) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
+    if (r.pos > 15) { insn.length = uint8_t(r.pos > 255 ? 255 : r.pos); res.status = DecodeStatus::Invalid; return res; }   // x86-64 caps at 15 bytes
 
     finalize(r, insn);
     res.status = DecodeStatus::Ok;

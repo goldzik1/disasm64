@@ -37,6 +37,7 @@ typedef struct d64_operand {
     int64_t  disp;
     int64_t  imm;
     uint64_t rel_target;    // absolute target for REL/RIP operands
+    uint8_t  access;        // 0 none, 1 read, 2 write, 3 read+write
 } d64_operand;
 
 typedef struct d64_insn {
@@ -46,6 +47,7 @@ typedef struct d64_insn {
     uint16_t mnemonic;      // Mnemonic enum value (0 when a raw-name SIMD op)
     uint8_t  operand_count;
     uint8_t  flags_read, flags_written;   // EFLAGS bitmask (CF PF AF ZF SF OF DF = 1,2,4,8,16,32,64)
+    uint8_t  category;      // Category enum (see category_name)
     uint8_t  lock, rep, opsize, addrsize, rex, vex, evex;
     d64_operand operands[4];
 } d64_insn;
@@ -64,6 +66,9 @@ D64_API uint8_t d64_relocate(const uint8_t* code, size_t n, uint64_t address, ui
 
 // Human-readable name for a register class value (RegClass enum).
 D64_API const char* d64_reg_class_name(uint8_t reg_class);
+
+// Human-readable name for a Category value.
+D64_API const char* d64_category_name(uint8_t category);
 
 // Library version string, e.g. "1.0".
 D64_API const char* d64_version(void);

@@ -24,6 +24,7 @@ void fillOperand(d64_operand& d, const Operand& o) {
     d.disp = o.mem.disp;
     d.imm = o.imm;
     d.rel_target = o.kind == OperandKind::Rel ? o.relTarget : o.mem.ripTarget;
+    d.access = uint8_t(o.access);
 }
 
 void fillInsn(d64_insn& d, const DecodeResult& r) {
@@ -36,6 +37,7 @@ void fillInsn(d64_insn& d, const DecodeResult& r) {
     d.operand_count = in.operandCount;
     d.flags_read = in.flagsRead;
     d.flags_written = in.flagsWritten;
+    d.category = uint8_t(in.category);
     d.lock = in.prefixes.lock ? 1 : 0;
     d.rep = in.prefixes.rep;
     d.opsize = in.prefixes.opsize ? 1 : 0;
@@ -81,6 +83,12 @@ const char* d64_reg_class_name(uint8_t reg_class) {
     static const char* names[] = {"none", "gpr8", "gpr8hi", "gpr16", "gpr32", "gpr64",
                                   "xmm", "ymm", "sreg", "rip", "st", "cr", "dr", "zmm", "k"};
     return reg_class < (sizeof names / sizeof names[0]) ? names[reg_class] : "?";
+}
+
+const char* d64_category_name(uint8_t category) {
+    static const char* names[] = {"unknown", "gpr", "branch", "stack", "string", "flags",
+                                  "sse", "avx", "avx512", "x87", "system", "nop"};
+    return category < (sizeof names / sizeof names[0]) ? names[category] : "?";
 }
 
 const char* d64_version(void) { return "1.0"; }

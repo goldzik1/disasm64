@@ -16,6 +16,12 @@ struct Reg {
 
 enum class OperandKind : uint8_t { None, Reg, Mem, Imm, Rel };
 
+enum class OperandAccess : uint8_t { None, Read, Write, ReadWrite };
+
+enum class Category : uint8_t {
+    Unknown, Gpr, Branch, Stack, String, Flags, Sse, Avx, Avx512, X87, System, Nop
+};
+
 struct MemOperand {
     Reg base;
     Reg index;
@@ -37,6 +43,7 @@ struct Operand {
     bool immSigned = true;
     uint64_t relTarget = 0;
     uint8_t relSize = 0;      // 1 or 4
+    OperandAccess access = OperandAccess::None;   // how the instruction touches this operand
 };
 
 struct Prefixes {
@@ -108,6 +115,7 @@ struct Instruction {
     const char* rawName = nullptr;   // SIMD leaf ops set this instead of a Mnemonic
     uint8_t flagsRead = 0;           // EFlag bitmask
     uint8_t flagsWritten = 0;
+    Category category = Category::Unknown;
 };
 
 struct DecodeResult {

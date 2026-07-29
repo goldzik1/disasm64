@@ -40,4 +40,24 @@ TEST_MAIN({
 
     CHECK_STR(std::string(d64_reg_class_name(5)), "gpr64");
     CHECK(std::strlen(d64_version()) > 0);
+
+    // semantic metadata: per-operand access + category
+    uint8_t add[] = {0x48, 0x01, 0xD8};                 // add rax, rbx
+    d64_decode(add, sizeof add, 0, &in);
+    CHECK_STR(std::string(d64_category_name(in.category)), "gpr");
+    CHECK_EQ(int(in.operands[0].access), 3);            // rax: read+write
+    CHECK_EQ(int(in.operands[1].access), 1);            // rbx: read
+
+    d64_decode(code, sizeof code, 0, &in);              // mov rbp, rsp
+    CHECK_EQ(int(in.operands[0].access), 2);            // write
+    CHECK_EQ(int(in.operands[1].access), 1);            // read
+
+    d64_decode(call, sizeof call, 0x401000, &in);
+    CHECK_STR(std::string(d64_category_name(in.category)), "branch");
+
+    uint8_t vadd[] = {0x62, 0xF1, 0x6C, 0x48, 0x58, 0xCB};   // vaddps zmm1, zmm2, zmm3
+    d64_decode(vadd, sizeof vadd, 0, &in);
+    CHECK_STR(std::string(d64_category_name(in.category)), "avx512");
+    CHECK_EQ(int(in.operands[0].access), 2);            // dest write
+    CHECK_EQ(int(in.operands[1].access), 1);            // source read
 })

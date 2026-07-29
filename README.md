@@ -146,8 +146,12 @@ only `pip install iced-x86`, then `python tools/diff_iced.py --tool build/diffto
 relative, each with a size), the prefixes, the length, and a `positionDependent` flag.
 The **Intel and AT&T** formatters are thin layers over that model — the structured decode
 is the point, so the same output feeds an analyzer or a lifter, not just a printer.
-Per-instruction EFLAGS read/written are already on the model (`flagsRead`/`flagsWritten`);
-the CLI surfaces them with `--flags`, and `--att` switches syntax.
+Per-instruction EFLAGS read/written are already on the model (`flagsRead`/`flagsWritten`),
+and so is **semantic metadata**: each operand carries a read / write / read-write `access`,
+and the instruction carries a `category` (gpr, branch, stack, string, sse, avx, avx512,
+x87, system, …). So `add rax, rbx` reports `rax` read-write and `rbx` read — enough to
+drive a dataflow pass without a second table. The CLI shows it with `--sem`, `--flags`
+surfaces EFLAGS, and `--att` switches syntax.
 
 ## Bindings, playground & speed
 
@@ -169,8 +173,9 @@ decode + re-encode ~24 M/s.
 
 ## Roadmap
 
-- Richer semantic metadata: implicit operands, per-operand read/write access,
-  ISA-set / category.
+- Semantic metadata already carries per-operand access and category; the next step is
+  **implicit operands** (the `rdx:rax` of `mul`, the `rsp` of `push`/`call`, the
+  `rsi`/`rdi`/`rcx` of the string ops) as first-class reads/writes.
 - Extend EVEX beyond the map-1 core: the `0F38`/`0F3A` AVX-512 maps, gather/scatter, the
   mask-register (`k`) instruction set, and embedded rounding `{er}`/`{sae}`.
 - Fold the iced-x86 differential into CI and widen it to mnemonic/operand agreement, not

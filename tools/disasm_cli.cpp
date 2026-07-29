@@ -7,14 +7,25 @@
 #include <vector>
 using namespace disasm64;
 
+static const char* catName(Category c) {
+    static const char* n[] = {"unknown", "gpr", "branch", "stack", "string", "flags",
+                              "sse", "avx", "avx512", "x87", "system", "nop"};
+    return n[int(c)];
+}
+static const char* accName(OperandAccess a) {
+    switch (a) { case OperandAccess::Read: return "r"; case OperandAccess::Write: return "w";
+                 case OperandAccess::ReadWrite: return "rw"; default: return "-"; }
+}
+
 int main(int argc, char** argv) {
     uint64_t base = 0x1000;
-    bool showFlags = false, att = false;
+    bool showFlags = false, att = false, showSem = false;
     std::vector<uint8_t> code;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--base") && i + 1 < argc) { base = std::strtoull(argv[++i], nullptr, 0); continue; }
         if (!std::strcmp(argv[i], "--flags")) { showFlags = true; continue; }
         if (!std::strcmp(argv[i], "--att")) { att = true; continue; }
+        if (!std::strcmp(argv[i], "--sem")) { showSem = true; continue; }
         code.push_back(uint8_t(std::strtoul(argv[i], nullptr, 16)));
     }
     if (code.empty()) { std::printf("usage: disasm64 [--base 0xADDR] <hex bytes...>\n"); return 1; }
@@ -30,6 +41,11 @@ int main(int argc, char** argv) {
             std::printf(" %s", (att ? formatAtt(r.insn) : formatIntel(r.insn)).c_str());
             if (showFlags && (r.insn.flagsWritten || r.insn.flagsRead))
                 std::printf("   [w:%s r:%s]", flagsToString(r.insn.flagsWritten).c_str(), flagsToString(r.insn.flagsRead).c_str());
+            if (showSem) {
+                std::printf("   [%s", catName(r.insn.category));
+                for (int k = 0; k < r.insn.operandCount; ++k) std::printf(" op%d:%s", k, accName(r.insn.operands[k].access));
+                std::printf("]");
+            }
             std::printf("\n");
         }
         else if (r.status == DecodeStatus::Truncated) { std::printf(" (truncated)\n"); break; }
