@@ -28,6 +28,7 @@ struct MemOperand {
     bool ripRelative = false;
     uint8_t segment = 0xFF;   // 0xFF == default segment; else Sreg index
     uint64_t ripTarget = 0;   // resolved absolute target when ripRelative
+    uint8_t dispOffset = 0;   // byte offset of the disp field within the instruction
 };
 
 struct Operand {

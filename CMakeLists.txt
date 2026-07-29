@@ -11,11 +11,12 @@ add_library(disasm64 STATIC
     src/prefix.cpp
     src/operand.cpp
     src/decode.cpp
-    src/format_intel.cpp)
+    src/format_intel.cpp
+    src/relocate.cpp)
 target_include_directories(disasm64 PUBLIC include)
 
 enable_testing()
-foreach(t reader prefix decode format)
+foreach(t reader prefix decode format relocate)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE disasm64)
     target_include_directories(test_${t} PRIVATE include tests src)
