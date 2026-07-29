@@ -85,10 +85,29 @@ bool decode0F38(Reader& r, Instruction& insn) {
     return false;
 }
 
+bool decode0F3A(Reader& r, Instruction& insn) {
+    const Prefixes& p = insn.prefixes;
+    uint8_t op = r.u8();
+    const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;
+    if (pp != 1) return false;
+    static const struct { uint8_t o; const char* n; } tbl[] = {
+        {0x08,"roundps"},{0x09,"roundpd"},{0x0A,"roundss"},{0x0B,"roundsd"},{0x0C,"blendps"},
+        {0x0D,"blendpd"},{0x0E,"pblendw"},{0x0F,"palignr"},{0x21,"insertps"},{0x40,"dpps"},
+        {0x41,"dppd"},{0x42,"mpsadbw"},{0x44,"pclmulqdq"},{0x60,"pcmpestrm"},{0x61,"pcmpestri"},
+        {0x62,"pcmpistrm"},{0x63,"pcmpistri"},
+    };
+    for (auto& e : tbl) if (e.o == op) {
+        Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16;
+        insn.rawName = e.n; addOp(insn, xmmReg(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true;
+    }
+    return false;
+}
+
 bool decode0F(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
     uint8_t op = r.u8();
     if (op == 0x38) return decode0F38(r, insn);
+    if (op == 0x3A) return decode0F3A(r, insn);
     if (op == 0x05) { insn.mnemonic = M::Syscall; return true; }
     if (op == 0x0B) { insn.mnemonic = M::Ud2; return true; }
     if (op == 0x1E) { if (p.rep == 0xF3) { uint8_t m = r.u8(); if (m == 0xFA) { insn.mnemonic = M::Endbr64; return true; } if (m == 0xFB) { insn.mnemonic = M::Endbr32; return true; } } return false; }
