@@ -93,7 +93,13 @@ bool decode0F(Reader& r, Instruction& insn) {
             vecEG(msz, op == 0x11); return true; }
         case 0x28: case 0x29: { if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Movapd : M::Movaps; vecEG(16, op == 0x29); return true; }
         case 0x6F: case 0x7F: { if (pp != 1 && pp != 2) return false; insn.mnemonic = pp == 1 ? M::Movdqa : M::Movdqu; vecEG(16, op == 0x7F); return true; }
+        case 0x54: if (pp >= 2) return false; insn.mnemonic = M(int(M::Andps) + pp); vecEG(16, false); return true;
+        case 0x55: if (pp >= 2) return false; insn.mnemonic = M(int(M::Andnps) + pp); vecEG(16, false); return true;
+        case 0x56: if (pp >= 2) return false; insn.mnemonic = M(int(M::Orps) + pp); vecEG(16, false); return true;
         case 0x57: { if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Xorpd : M::Xorps; vecEG(16, false); return true; }
+        case 0xDB: if (pp != 1) return false; insn.mnemonic = M::Pand; vecEG(16, false); return true;
+        case 0xDF: if (pp != 1) return false; insn.mnemonic = M::Pandn; vecEG(16, false); return true;
+        case 0xEB: if (pp != 1) return false; insn.mnemonic = M::Por; vecEG(16, false); return true;
         case 0xEF: { if (pp != 1) return false; insn.mnemonic = M::Pxor; vecEG(16, false); return true; }
         case 0x6E: { if (pp != 1) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm);
             insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }

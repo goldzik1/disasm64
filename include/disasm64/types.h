@@ -75,6 +75,7 @@ enum class Mnemonic : uint16_t {
     // SSE (curated)
     Movups, Movupd, Movss, Movsd, Movaps, Movapd, Movdqa, Movdqu,
     Movd, Movq, Pxor, Xorps, Xorpd,
+    Andps, Andpd, Andnps, Andnpd, Orps, Orpd, Pand, Por, Pandn,
     // SSE arithmetic — laid out ps,pd,ss,sd per op so mnemonic = base + pp
     Addps, Addpd, Addss, Addsd, Mulps, Mulpd, Mulss, Mulsd,
     Subps, Subpd, Subss, Subsd, Divps, Divpd, Divss, Divsd,

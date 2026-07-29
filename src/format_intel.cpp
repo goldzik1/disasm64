@@ -118,6 +118,9 @@ std::string mnemStr(const Instruction& insn) {
         case Mnemonic::Movdqa: return "movdqa"; case Mnemonic::Movdqu: return "movdqu";
         case Mnemonic::Movd: return "movd"; case Mnemonic::Movq: return "movq";
         case Mnemonic::Pxor: return "pxor"; case Mnemonic::Xorps: return "xorps"; case Mnemonic::Xorpd: return "xorpd";
+        case Mnemonic::Andps: return "andps"; case Mnemonic::Andpd: return "andpd"; case Mnemonic::Andnps: return "andnps";
+        case Mnemonic::Andnpd: return "andnpd"; case Mnemonic::Orps: return "orps"; case Mnemonic::Orpd: return "orpd";
+        case Mnemonic::Pand: return "pand"; case Mnemonic::Por: return "por"; case Mnemonic::Pandn: return "pandn";
         default: {
             Mnemonic m = insn.mnemonic;
             if (m >= Mnemonic::Addps && m <= Mnemonic::Sqrtsd) {
