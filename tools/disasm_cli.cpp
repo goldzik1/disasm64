@@ -3,6 +3,7 @@
 #include "disasm64/analysis.h"
 #include "disasm64/loader.h"
 #include "disasm64/image.h"
+#include "disasm64/cfg.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -52,7 +53,7 @@ static void emit(const uint8_t* code, size_t n, uint64_t base, bool att, bool sh
 int main(int argc, char** argv) {
     uint64_t base = 0x1000;
     bool showFlags = false, att = false, showSem = false;
-    bool doImports = false, doExports = false, doStrings = false;
+    bool doImports = false, doExports = false, doStrings = false, doCfg = false;
     const char* filePath = nullptr;
     const char* pattern = nullptr;
     std::vector<uint8_t> code;
@@ -63,6 +64,7 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--imports")) { doImports = true; continue; }
         if (!std::strcmp(argv[i], "--exports")) { doExports = true; continue; }
         if (!std::strcmp(argv[i], "--strings")) { doStrings = true; continue; }
+        if (!std::strcmp(argv[i], "--cfg")) { doCfg = true; continue; }
         if (!std::strcmp(argv[i], "--flags")) { showFlags = true; continue; }
         if (!std::strcmp(argv[i], "--att")) { att = true; continue; }
         if (!std::strcmp(argv[i], "--sem")) { showSem = true; continue; }
@@ -96,6 +98,21 @@ int main(int argc, char** argv) {
         }
         if (pattern) {
             for (const Match& m : patternSearch(im, pattern)) std::printf("%016llx\n", (unsigned long long)m.va);
+            return 0;
+        }
+        if (doCfg) {
+            for (const CodeRegion& rg : im.code) {
+                if (im.entry < rg.vaddr || im.entry >= rg.vaddr + rg.size) continue;
+                Cfg cfg = buildCfg(regionData(im, rg), rg.size, rg.vaddr, im.entry);
+                std::printf("; %zu basic blocks, %zu call targets from entry %llx\n",
+                            cfg.blocks.size(), cfg.calls.size(), (unsigned long long)im.entry);
+                for (const BasicBlock& b : cfg.blocks) {
+                    std::printf("%016llx - %016llx  ->", (unsigned long long)b.start, (unsigned long long)b.end);
+                    for (uint64_t s : b.succs) std::printf(" %llx", (unsigned long long)s);
+                    std::printf("\n");
+                }
+                break;
+            }
             return 0;
         }
         for (const CodeRegion& rg : im.code) {

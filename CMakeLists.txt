@@ -17,6 +17,7 @@ add_library(disasm64 STATIC
     src/encode.cpp
     src/loader.cpp
     src/image.cpp
+    src/cfg.cpp
     src/analysis.cpp)
 target_include_directories(disasm64 PUBLIC include)
 
@@ -45,7 +46,7 @@ add_executable(difftool tools/difftool.cpp)
 target_link_libraries(difftool PRIVATE disasm64)
 
 enable_testing()
-foreach(t reader prefix decode format att ext encode loader image relocate analysis)
+foreach(t reader prefix decode format att ext encode loader image cfg relocate analysis)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE disasm64)
     target_include_directories(test_${t} PRIVATE include tests src)
