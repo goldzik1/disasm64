@@ -270,6 +270,9 @@ bool decodeVex(Reader& r, Instruction& insn) {
     auto rmVec = [&](int memSz, Operand& rm) { int reg = decodeModRM(r, p, memSz, rm, vc); if (rm.kind == OperandKind::Reg) rm.sizeBytes = uint8_t(vsz); return reg; };
     auto three = [&](M base, int memSz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = base; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); };
     auto two = [&](M m, int memSz, bool store) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; if (store) { addOp(insn, rm); addOp(insn, vreg(reg)); } else { addOp(insn, vreg(reg)); addOp(insn, rm); } };
+    auto twoImm = [&](M m, int memSz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; addOp(insn, vreg(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
+    auto threeImm = [&](M m, int memSz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
+    auto gprDst = [&](M m, int memSz, int gsz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; addOp(insn, regOp(makeGpr(reg, gsz, p.rex))); addOp(insn, rm); };
     const int sc = (pp == 2) ? 4 : (pp == 3) ? 8 : vsz;   // scalar/packed mem size
 
     switch (op) {
@@ -296,6 +299,33 @@ bool decodeVex(Reader& r, Instruction& insn) {
             if (pp == 1) { int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, rm); addOp(insn, vreg(reg)); return true; }
             return false;
         }
+        case 0x14: if (pp >= 2) return false; three(pp == 1 ? M::Unpcklpd : M::Unpcklps, vsz); return true;
+        case 0x15: if (pp >= 2) return false; three(pp == 1 ? M::Unpckhpd : M::Unpckhps, vsz); return true;
+        case 0x50: if (pp >= 2) return false; gprDst(pp == 1 ? M::Movmskpd : M::Movmskps, vsz, 4); return true;
+        case 0xD7: if (pp != 1) return false; gprDst(M::Pmovmskb, vsz, 4); return true;
+        case 0x70: if (pp == 0) return false; twoImm(pp == 1 ? M::Pshufd : pp == 2 ? M::Pshufhw : M::Pshuflw, vsz); return true;
+        case 0xC6: if (pp >= 2) return false; threeImm(pp == 1 ? M::Shufpd : M::Shufps, vsz); return true;
+        case 0x5D: three(M(int(M::Minps) + pp), sc); return true;
+        case 0x5F: three(M(int(M::Maxps) + pp), sc); return true;
+        case 0xC2: threeImm(M(int(M::Cmpps) + pp), sc); return true;
+        case 0x5B: if (pp == 3) return false; two(pp == 0 ? M::Cvtdq2ps : pp == 1 ? M::Cvtps2dq : M::Cvttps2dq, vsz, false); return true;
+        case 0x5A: if (pp >= 2) three(pp == 2 ? M::Cvtss2sd : M::Cvtsd2ss, sc); else two(pp == 1 ? M::Cvtpd2ps : M::Cvtps2pd, vsz, false); return true;
+        case 0x2A: { if (pp != 2 && pp != 3) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = pp == 2 ? M::Cvtsi2ss : M::Cvtsi2sd; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); return true; }
+        case 0x2C: case 0x2D: { if (pp != 2 && pp != 3) return false; int ms = pp == 2 ? 4 : 8; int gs = p.rexW ? 8 : 4; bool tr = op == 0x2C; gprDst(tr ? (pp == 2 ? M::Cvttss2si : M::Cvttsd2si) : (pp == 2 ? M::Cvtss2si : M::Cvtsd2si), ms, gs); return true; }
+        case 0xFC: if (pp != 1) return false; three(M::Paddb, vsz); return true;
+        case 0xFD: if (pp != 1) return false; three(M::Paddw, vsz); return true;
+        case 0xFE: if (pp != 1) return false; three(M::Paddd, vsz); return true;
+        case 0xD4: if (pp != 1) return false; three(M::Paddq, vsz); return true;
+        case 0xF8: if (pp != 1) return false; three(M::Psubb, vsz); return true;
+        case 0xF9: if (pp != 1) return false; three(M::Psubw, vsz); return true;
+        case 0xFA: if (pp != 1) return false; three(M::Psubd, vsz); return true;
+        case 0xFB: if (pp != 1) return false; three(M::Psubq, vsz); return true;
+        case 0x74: if (pp != 1) return false; three(M::Pcmpeqb, vsz); return true;
+        case 0x75: if (pp != 1) return false; three(M::Pcmpeqw, vsz); return true;
+        case 0x76: if (pp != 1) return false; three(M::Pcmpeqd, vsz); return true;
+        case 0x64: if (pp != 1) return false; three(M::Pcmpgtb, vsz); return true;
+        case 0x65: if (pp != 1) return false; three(M::Pcmpgtw, vsz); return true;
+        case 0x66: if (pp != 1) return false; three(M::Pcmpgtd, vsz); return true;
         default: return false;
     }
 }
