@@ -1,6 +1,7 @@
 # disasm64
 
 [![ci](https://github.com/goldzik1/disasm64/actions/workflows/ci.yml/badge.svg)](https://github.com/goldzik1/disasm64/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/goldzik1/disasm64)](https://github.com/goldzik1/disasm64/releases/latest)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
 ![deps](https://img.shields.io/badge/dependencies-none-brightgreen)
 
@@ -34,8 +35,9 @@ $ disasm64 --base 0x401000 66 66 90 48 8b 80 05 00 00 00 eb 01 48 90
 ## Desktop GUI
 
 A small native front-end (`gui/`, Win32, dark theme, no dependencies) disassembles as you
-type, with syntax colouring and the same quirk / anti-disassembly annotations. Build it
-with `cmake --build build --target disasm64_gui`.
+type, with syntax colouring and the same quirk / anti-disassembly annotations. Grab the
+prebuilt `disasm64_gui.exe` from the [latest release](https://github.com/goldzik1/disasm64/releases/latest)
+and just run it, or build it with `cmake --build build --target disasm64_gui`.
 
 ![disasm64 GUI](gui/screenshot.png)
 
