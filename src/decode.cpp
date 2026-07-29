@@ -317,7 +317,7 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
 
 bool decodeVex(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
-    if (p.vexMap != 1) return false;   // 0F map only
+    if (p.vexMap < 1 || p.vexMap > 3) return false;
     uint8_t op = r.u8();
     const int pp = p.vexPP;            // 0 none 1=66 2=F3 3=F2
     const RegClass vc = p.vexL ? RegClass::Ymm : RegClass::Xmm;
@@ -329,7 +329,44 @@ bool decodeVex(Reader& r, Instruction& insn) {
     auto twoImm = [&](M m, int memSz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; addOp(insn, vreg(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
     auto threeImm = [&](M m, int memSz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
     auto gprDst = [&](M m, int memSz, int gsz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; addOp(insn, regOp(makeGpr(reg, gsz, p.rex))); addOp(insn, rm); };
+    auto twoRaw = [&](const char* nm) { Operand rm; int reg = rmVec(vsz, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, rm); };
+    auto threeRaw = [&](const char* nm) { Operand rm; int reg = rmVec(vsz, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); };
+    auto twoRawImm = [&](const char* nm) { Operand rm; int reg = rmVec(vsz, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
+    auto threeRawImm = [&](const char* nm) { Operand rm; int reg = rmVec(vsz, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
     const int sc = (pp == 2) ? 4 : (pp == 3) ? 8 : vsz;   // scalar/packed mem size
+
+    if (p.vexMap == 2) {                               // VEX 0F38
+        if (pp != 1) return false;
+        if (op == 0x17) { twoRaw("ptest"); return true; }
+        if (op == 0x41) { twoRaw("phminposuw"); return true; }
+        if (op >= 0x1C && op <= 0x1E) { static const char* n[] = {"pabsb","pabsw","pabsd"}; twoRaw(n[op - 0x1C]); return true; }
+        if ((op >= 0x20 && op <= 0x25) || (op >= 0x30 && op <= 0x35)) {
+            static const char* nz[] = {"pmovzxbw","pmovzxbd","pmovzxbq","pmovzxwd","pmovzxwq","pmovzxdq"};
+            static const char* ns[] = {"pmovsxbw","pmovsxbd","pmovsxbq","pmovsxwd","pmovsxwq","pmovsxdq"};
+            twoRaw((op >= 0x30 ? nz : ns)[op & 0x0F]); return true;
+        }
+        static const struct { uint8_t o; const char* n; } t[] = {
+            {0x00,"pshufb"},{0x01,"phaddw"},{0x02,"phaddd"},{0x03,"phaddsw"},{0x04,"pmaddubsw"},{0x05,"phsubw"},
+            {0x06,"phsubd"},{0x07,"phsubsw"},{0x08,"psignb"},{0x09,"psignw"},{0x0A,"psignd"},{0x0B,"pmulhrsw"},
+            {0x28,"pmuldq"},{0x29,"pcmpeqq"},{0x2B,"packusdw"},{0x37,"pcmpgtq"},{0x38,"pminsb"},{0x39,"pminsd"},
+            {0x3A,"pminuw"},{0x3B,"pminud"},{0x3C,"pmaxsb"},{0x3D,"pmaxsd"},{0x3E,"pmaxuw"},{0x3F,"pmaxud"},{0x40,"pmulld"},
+        };
+        for (auto& e : t) if (e.o == op) { threeRaw(e.n); return true; }
+        return false;
+    }
+    if (p.vexMap == 3) {                               // VEX 0F3A
+        if (pp != 1) return false;
+        if (op == 0x08) { twoRawImm("roundps"); return true; }
+        if (op == 0x09) { twoRawImm("roundpd"); return true; }
+        if (op >= 0x60 && op <= 0x63) { static const char* n[] = {"pcmpestrm","pcmpestri","pcmpistrm","pcmpistri"}; twoRawImm(n[op - 0x60]); return true; }
+        static const struct { uint8_t o; const char* n; } t[] = {
+            {0x0A,"roundss"},{0x0B,"roundsd"},{0x0C,"blendps"},{0x0D,"blendpd"},{0x0E,"pblendw"},{0x0F,"palignr"},
+            {0x21,"insertps"},{0x40,"dpps"},{0x41,"dppd"},{0x42,"mpsadbw"},{0x44,"pclmulqdq"},
+        };
+        for (auto& e : t) if (e.o == op) { threeRawImm(e.n); return true; }
+        return false;
+    }
+
 
     switch (op) {
         case 0x10: case 0x11: { M m = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd; two(m, sc, op == 0x11); return true; }
