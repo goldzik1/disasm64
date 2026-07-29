@@ -96,6 +96,7 @@ struct Instruction {
     uint8_t operandCount = 0;
     Prefixes prefixes;
     bool positionDependent = false;
+    const char* rawName = nullptr;   // SIMD leaf ops set this instead of a Mnemonic
 };
 
 struct DecodeResult {

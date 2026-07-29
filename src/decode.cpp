@@ -29,6 +29,7 @@ int sizeOfClass(RegClass c) {
 Operand regOp(Reg reg) {
     Operand o; o.kind = OperandKind::Reg; o.reg = reg; o.sizeBytes = uint8_t(sizeOfClass(reg.cls)); return o;
 }
+Operand xmmReg(int idx) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = RegClass::Xmm; o.reg.idx = uint8_t(idx); o.sizeBytes = 16; return o; }
 Operand immOp(Reader& r, int size) {
     Operand o; o.kind = OperandKind::Imm; o.sizeBytes = uint8_t(size); o.imm = r.imm(size); return o;
 }
@@ -49,9 +50,45 @@ void addOp(Instruction& insn, const Operand& o) {
     if (insn.operandCount < 4) insn.operands[insn.operandCount++] = o;
 }
 
+bool decode0F38(Reader& r, Instruction& insn) {
+    const Prefixes& p = insn.prefixes;
+    uint8_t op = r.u8();
+    if (op == 0xF0 || op == 0xF1) {   // movbe (GP)
+        int s = SZv(p); Operand rm; int reg = decodeModRM(r, p, s, rm);
+        insn.rawName = "movbe";
+        if (op == 0xF0) { addOp(insn, regOp(makeGpr(reg, s, p.rex))); addOp(insn, rm); }
+        else { addOp(insn, rm); addOp(insn, regOp(makeGpr(reg, s, p.rex))); }
+        return true;
+    }
+    const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;
+    if (pp != 1) return false;
+    if ((op >= 0x20 && op <= 0x25) || (op >= 0x30 && op <= 0x35)) {   // pmovsx / pmovzx
+        static const char* nz[] = {"pmovzxbw","pmovzxbd","pmovzxbq","pmovzxwd","pmovzxwq","pmovzxdq"};
+        static const char* ns[] = {"pmovsxbw","pmovsxbd","pmovsxbq","pmovsxwd","pmovsxwq","pmovsxdq"};
+        static const int msz[] = {8, 4, 2, 8, 4, 8};
+        int i = op & 0x0F; bool zx = op >= 0x30;
+        Operand rm; int reg = decodeModRM(r, p, msz[i], rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16;
+        insn.rawName = zx ? nz[i] : ns[i];
+        addOp(insn, xmmReg(reg)); addOp(insn, rm); return true;
+    }
+    static const struct { uint8_t o; const char* n; } tbl[] = {
+        {0x00,"pshufb"},{0x01,"phaddw"},{0x02,"phaddd"},{0x03,"phaddsw"},{0x04,"pmaddubsw"},
+        {0x05,"phsubw"},{0x06,"phsubd"},{0x07,"phsubsw"},{0x08,"psignb"},{0x09,"psignw"},{0x0A,"psignd"},
+        {0x0B,"pmulhrsw"},{0x17,"ptest"},{0x1C,"pabsb"},{0x1D,"pabsw"},{0x1E,"pabsd"},{0x28,"pmuldq"},
+        {0x29,"pcmpeqq"},{0x2B,"packusdw"},{0x37,"pcmpgtq"},{0x38,"pminsb"},{0x39,"pminsd"},{0x3A,"pminuw"},
+        {0x3B,"pminud"},{0x3C,"pmaxsb"},{0x3D,"pmaxsd"},{0x3E,"pmaxuw"},{0x3F,"pmaxud"},{0x40,"pmulld"},{0x41,"phminposuw"},
+    };
+    for (auto& e : tbl) if (e.o == op) {
+        Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16;
+        insn.rawName = e.n; addOp(insn, xmmReg(reg)); addOp(insn, rm); return true;
+    }
+    return false;
+}
+
 bool decode0F(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
     uint8_t op = r.u8();
+    if (op == 0x38) return decode0F38(r, insn);
     if (op == 0x05) { insn.mnemonic = M::Syscall; return true; }
     if (op == 0x0B) { insn.mnemonic = M::Ud2; return true; }
     if (op == 0x1E) { if (p.rep == 0xF3) { uint8_t m = r.u8(); if (m == 0xFA) { insn.mnemonic = M::Endbr64; return true; } if (m == 0xFB) { insn.mnemonic = M::Endbr32; return true; } } return false; }
@@ -356,7 +393,7 @@ DecodeResult decode(const uint8_t* p, size_t n, uint64_t address) {
     else { uint8_t op = r.u8(); handled = (op == 0x0F) ? decode0F(r, insn) : decodeOne(r, insn, op); }
 
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
-    if (!handled || insn.mnemonic == M::Invalid) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
+    if (!handled || (insn.mnemonic == M::Invalid && insn.rawName == nullptr)) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
 
     finalize(r, insn);
     res.status = DecodeStatus::Ok;

@@ -79,6 +79,7 @@ std::string operandStr(const Operand& o) {
 }
 
 std::string mnemStr(const Instruction& insn) {
+    if (insn.rawName) return insn.rawName;
     switch (insn.mnemonic) {
         case Mnemonic::Add: return "add";   case Mnemonic::Or: return "or";    case Mnemonic::Adc: return "adc";
         case Mnemonic::Sbb: return "sbb";   case Mnemonic::And: return "and";  case Mnemonic::Sub: return "sub";
