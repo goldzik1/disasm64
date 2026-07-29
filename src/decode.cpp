@@ -202,6 +202,22 @@ bool decode0F(Reader& r, Instruction& insn) {
         case 0x10: case 0x11: { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16;
             insn.mnemonic = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd;
             vecEG(msz, op == 0x11); return true; }
+        case 0x12: {
+            if (pp == 2) { insn.rawName = "movsldup"; vecEG(16, false); return true; }
+            if (pp == 3) { insn.rawName = "movddup"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
+            if ((r.peek() >> 6) == 3 && pp == 0) { insn.rawName = "movhlps"; vecEG(16, false); return true; }
+            insn.rawName = pp == 1 ? "movlpd" : "movlps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true;
+        }
+        case 0x13: { if (pp >= 2) return false; insn.rawName = pp == 1 ? "movlpd" : "movlps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0x16: {
+            if (pp == 2) { insn.rawName = "movshdup"; vecEG(16, false); return true; }
+            if ((r.peek() >> 6) == 3 && pp == 0) { insn.rawName = "movlhps"; vecEG(16, false); return true; }
+            insn.rawName = pp == 1 ? "movhpd" : "movhps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true;
+        }
+        case 0x17: { if (pp >= 2) return false; insn.rawName = pp == 1 ? "movhpd" : "movhps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0x2B: { if (pp >= 2) return false; insn.rawName = pp == 1 ? "movntpd" : "movntps"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0xE7: { if (pp != 1) return false; insn.rawName = "movntdq"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0xF0: { if (pp != 3) return false; insn.rawName = "lddqu"; vecEG(16, false); return true; }
         case 0x28: case 0x29: { if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Movapd : M::Movaps; vecEG(16, op == 0x29); return true; }
         case 0x6F: case 0x7F: { if (pp != 1 && pp != 2) return false; insn.mnemonic = pp == 1 ? M::Movdqa : M::Movdqu; vecEG(16, op == 0x7F); return true; }
         case 0x54: if (pp >= 2) return false; insn.mnemonic = M(int(M::Andps) + pp); vecEG(16, false); return true;

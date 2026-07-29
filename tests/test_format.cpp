@@ -105,6 +105,13 @@ TEST_MAIN({
     CHECK_STR(fmt({0x0F, 0xAE, 0xF0}), "mfence");
     CHECK_STR(fmt({0x0F, 0x01, 0xF9}), "rdtscp");
     CHECK_STR(fmt({0xF2, 0x0F, 0x38, 0xF1, 0xC1}), "crc32 eax, ecx");
+    // move family
+    CHECK_STR(fmt({0x0F, 0x16, 0xC1}), "movlhps xmm0, xmm1");
+    CHECK_STR(fmt({0xF2, 0x0F, 0x12, 0xC1}), "movddup xmm0, xmm1");
+    CHECK_STR(fmt({0xF3, 0x0F, 0x16, 0xC1}), "movshdup xmm0, xmm1");
+    CHECK_STR(fmt({0x0F, 0x13, 0x08}), "movlps qword ptr [rax], xmm1");
+    CHECK_STR(fmt({0x66, 0x0F, 0xE7, 0x08}), "movntdq xmmword ptr [rax], xmm1");
+    CHECK_STR(fmt({0xF2, 0x0F, 0xF0, 0x08}), "lddqu xmm1, xmmword ptr [rax]");
 })
 
 
