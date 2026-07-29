@@ -117,6 +117,20 @@ TEST_MAIN({
     CHECK_STR(fmt({0x66, 0x0F, 0xC5, 0xC1, 0x02}), "pextrw eax, xmm1, 0x2");
     CHECK_STR(fmt({0x66, 0x0F, 0x3A, 0x20, 0xC1, 0x04}), "pinsrb xmm0, ecx, 0x4");
     CHECK_STR(fmt({0x66, 0x0F, 0x3A, 0x16, 0xC8, 0x01}), "pextrd eax, xmm1, 0x1");
+    // x87
+    CHECK_STR(fmt({0xD9, 0xC0}), "fld st(0)");
+    CHECK_STR(fmt({0xD8, 0xC1}), "fadd st(0), st(1)");
+    CHECK_STR(fmt({0xDC, 0xC1}), "fadd st(1), st(0)");
+    CHECK_STR(fmt({0xDE, 0xC1}), "faddp st(1), st(0)");
+    CHECK_STR(fmt({0xD9, 0xE8}), "fld1");
+    CHECK_STR(fmt({0xDD, 0xD8}), "fstp st(0)");
+    CHECK_STR(fmt({0xDB, 0xE3}), "fninit");
+    CHECK_STR(fmt({0xDF, 0xE0}), "fnstsw ax");
+    CHECK_STR(fmt({0xD9, 0x00}), "fld dword ptr [rax]");
+    CHECK_STR(fmt({0xDD, 0x18}), "fstp qword ptr [rax]");
+    CHECK_STR(fmt({0xDF, 0x28}), "fild qword ptr [rax]");
+    CHECK_STR(fmt({0xDB, 0x2B}), "fld tbyte ptr [rbx]");
+    CHECK_STR(fmt({0xDE, 0xD9}), "fcompp");
 })
 
 

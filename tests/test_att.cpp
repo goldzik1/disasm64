@@ -19,4 +19,6 @@ TEST_MAIN({
     CHECK_STR(att({0x48, 0x8B, 0x04, 0x08}), "mov (%rax,%rcx,1), %rax");
     CHECK_STR(att({0x0F, 0x28, 0xC1}), "movaps %xmm1, %xmm0");
     CHECK_STR(att({0xE8, 0x00, 0x00, 0x00, 0x00}), "call 0x5");
+    CHECK_STR(att({0xD9, 0xC1}), "fld %st(1)");
+    CHECK_STR(att({0xDE, 0xC1}), "faddp %st(0), %st(1)");
 })

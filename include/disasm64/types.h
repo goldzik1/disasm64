@@ -5,7 +5,7 @@
 namespace disasm64 {
 
 enum class RegClass : uint8_t {
-    None, Gpr8, Gpr8Hi, Gpr16, Gpr32, Gpr64, Xmm, Ymm, Sreg, Rip
+    None, Gpr8, Gpr8Hi, Gpr16, Gpr32, Gpr64, Xmm, Ymm, Sreg, Rip, St
 };
 
 struct Reg {

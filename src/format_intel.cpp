@@ -28,6 +28,7 @@ std::string regName(const Reg& r) {
         case RegClass::Xmm:   return "xmm" + std::to_string(r.idx);
         case RegClass::Ymm:   return "ymm" + std::to_string(r.idx);
         case RegClass::Rip:   return "rip";
+        case RegClass::St:    return "st(" + std::to_string(r.idx) + ")";
         default: return "?";
     }
 }
@@ -38,6 +39,7 @@ const char* ptrKind(uint8_t sz) {
         case 2: return "word ptr ";
         case 4: return "dword ptr ";
         case 8: return "qword ptr ";
+        case 10: return "tbyte ptr ";
         case 16: return "xmmword ptr ";
         case 32: return "ymmword ptr ";
         default: return "";

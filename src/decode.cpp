@@ -23,6 +23,7 @@ int sizeOfClass(RegClass c) {
         case RegClass::Gpr64: return 8;
         case RegClass::Xmm: return 16;
         case RegClass::Ymm: return 32;
+        case RegClass::St: return 10;
         default: return 0;
     }
 }
@@ -267,6 +268,119 @@ bool decode0F(Reader& r, Instruction& insn) {
             return false; }
         default: return false;
     }
+}
+
+bool decodeX87(Reader& r, Instruction& insn, uint8_t op) {
+    const Prefixes& p = insn.prefixes;
+    auto st = [](int i) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = RegClass::St; o.reg.idx = uint8_t(i & 7); o.sizeBytes = 10; return o; };
+    uint8_t m = r.peek();
+    int mod = m >> 6, reg = (m >> 3) & 7, rm = m & 7;
+    if (mod != 3) {
+        static const char* AR[8] = {"fadd","fmul","fcom","fcomp","fsub","fsubr","fdiv","fdivr"};
+        static const char* FI[8] = {"fiadd","fimul","ficom","ficomp","fisub","fisubr","fidiv","fidivr"};
+        static const char* D9[8] = {"fld",nullptr,"fst","fstp","fldenv","fldcw","fnstenv","fnstcw"};
+        static const int   D9S[8] = {4,0,4,4,0,2,0,2};
+        static const char* DB[8] = {"fild","fisttp","fist","fistp",nullptr,"fld",nullptr,"fstp"};
+        static const int   DBS[8] = {4,4,4,4,0,10,0,10};
+        static const char* DD[8] = {"fld","fisttp","fst","fstp","frstor",nullptr,"fnsave","fnstsw"};
+        static const int   DDS[8] = {8,8,8,8,0,0,0,2};
+        static const char* DF[8] = {"fild","fisttp","fist","fistp","fbld","fild","fbstp","fistp"};
+        static const int   DFS[8] = {2,2,2,2,10,8,10,8};
+        const char* nm = nullptr; int sz = 0;
+        switch (op) {
+            case 0xD8: nm = AR[reg]; sz = 4; break;
+            case 0xDC: nm = AR[reg]; sz = 8; break;
+            case 0xDA: nm = FI[reg]; sz = 4; break;
+            case 0xDE: nm = FI[reg]; sz = 2; break;
+            case 0xD9: nm = D9[reg]; sz = D9S[reg]; break;
+            case 0xDB: nm = DB[reg]; sz = DBS[reg]; break;
+            case 0xDD: nm = DD[reg]; sz = DDS[reg]; break;
+            case 0xDF: nm = DF[reg]; sz = DFS[reg]; break;
+        }
+        if (!nm) return false;
+        Operand mem; decodeModRM(r, p, sz, mem);
+        insn.rawName = nm; addOp(insn, mem); return true;
+    }
+    r.u8();
+    switch (op) {
+        case 0xD8: { static const char* n[8] = {"fadd","fmul","fcom","fcomp","fsub","fsubr","fdiv","fdivr"}; insn.rawName = n[reg]; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+        case 0xDC: { static const char* n[8] = {"fadd","fmul",nullptr,nullptr,"fsubr","fsub","fdivr","fdiv"}; if (!n[reg]) return false; insn.rawName = n[reg]; addOp(insn, st(rm)); addOp(insn, st(0)); return true; }
+        case 0xD9:
+            if (m < 0xC8) { insn.rawName = "fld"; addOp(insn, st(rm)); return true; }
+            if (m < 0xD0) { insn.rawName = "fxch"; addOp(insn, st(rm)); return true; }
+            switch (m) {
+                case 0xD0: insn.rawName = "fnop"; return true;
+                case 0xE0: insn.rawName = "fchs"; return true;
+                case 0xE1: insn.rawName = "fabs"; return true;
+                case 0xE4: insn.rawName = "ftst"; return true;
+                case 0xE5: insn.rawName = "fxam"; return true;
+                case 0xE8: insn.rawName = "fld1"; return true;
+                case 0xE9: insn.rawName = "fldl2t"; return true;
+                case 0xEA: insn.rawName = "fldl2e"; return true;
+                case 0xEB: insn.rawName = "fldpi"; return true;
+                case 0xEC: insn.rawName = "fldlg2"; return true;
+                case 0xED: insn.rawName = "fldln2"; return true;
+                case 0xEE: insn.rawName = "fldz"; return true;
+                case 0xF0: insn.rawName = "f2xm1"; return true;
+                case 0xF1: insn.rawName = "fyl2x"; return true;
+                case 0xF2: insn.rawName = "fptan"; return true;
+                case 0xF3: insn.rawName = "fpatan"; return true;
+                case 0xF4: insn.rawName = "fxtract"; return true;
+                case 0xF5: insn.rawName = "fprem1"; return true;
+                case 0xF6: insn.rawName = "fdecstp"; return true;
+                case 0xF7: insn.rawName = "fincstp"; return true;
+                case 0xF8: insn.rawName = "fprem"; return true;
+                case 0xF9: insn.rawName = "fyl2xp1"; return true;
+                case 0xFA: insn.rawName = "fsqrt"; return true;
+                case 0xFB: insn.rawName = "fsincos"; return true;
+                case 0xFC: insn.rawName = "frndint"; return true;
+                case 0xFD: insn.rawName = "fscale"; return true;
+                case 0xFE: insn.rawName = "fsin"; return true;
+                case 0xFF: insn.rawName = "fcos"; return true;
+            }
+            return false;
+        case 0xDA:
+            if (m < 0xC8) { insn.rawName = "fcmovb"; }
+            else if (m < 0xD0) { insn.rawName = "fcmove"; }
+            else if (m < 0xD8) { insn.rawName = "fcmovbe"; }
+            else if (m < 0xE0) { insn.rawName = "fcmovu"; }
+            else if (m == 0xE9) { insn.rawName = "fucompp"; return true; }
+            else return false;
+            addOp(insn, st(0)); addOp(insn, st(rm)); return true;
+        case 0xDB:
+            if (m < 0xC8) { insn.rawName = "fcmovnb"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m < 0xD0) { insn.rawName = "fcmovne"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m < 0xD8) { insn.rawName = "fcmovnbe"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m < 0xE0) { insn.rawName = "fcmovnu"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m == 0xE2) { insn.rawName = "fnclex"; return true; }
+            if (m == 0xE3) { insn.rawName = "fninit"; return true; }
+            if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fucomi"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m >= 0xF0 && m < 0xF8) { insn.rawName = "fcomi"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            return false;
+        case 0xDD:
+            if (m < 0xC8) { insn.rawName = "ffree"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xD0 && m < 0xD8) { insn.rawName = "fst"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xD8 && m < 0xE0) { insn.rawName = "fstp"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xE0 && m < 0xE8) { insn.rawName = "fucom"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fucomp"; addOp(insn, st(rm)); return true; }
+            return false;
+        case 0xDE:
+            if (m < 0xC8) { insn.rawName = "faddp"; }
+            else if (m < 0xD0) { insn.rawName = "fmulp"; }
+            else if (m == 0xD9) { insn.rawName = "fcompp"; return true; }
+            else if (m >= 0xE0 && m < 0xE8) { insn.rawName = "fsubrp"; }
+            else if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fsubp"; }
+            else if (m >= 0xF0 && m < 0xF8) { insn.rawName = "fdivrp"; }
+            else if (m >= 0xF8) { insn.rawName = "fdivp"; }
+            else return false;
+            addOp(insn, st(rm)); addOp(insn, st(0)); return true;
+        case 0xDF:
+            if (m == 0xE0) { insn.rawName = "fnstsw"; addOp(insn, regOp(makeGpr(0, 2, p.rex))); return true; }
+            if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fucomip"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m >= 0xF0 && m < 0xF8) { insn.rawName = "fcomip"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            return false;
+    }
+    return false;
 }
 
 bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
@@ -562,7 +676,7 @@ DecodeResult decode(const uint8_t* p, size_t n, uint64_t address) {
 
     bool handled;
     if (insn.prefixes.vex) handled = decodeVex(r, insn);
-    else { uint8_t op = r.u8(); handled = (op == 0x0F) ? decode0F(r, insn) : decodeOne(r, insn, op); }
+    else { uint8_t op = r.u8(); handled = (op == 0x0F) ? decode0F(r, insn) : (op >= 0xD8 && op <= 0xDF) ? decodeX87(r, insn, op) : decodeOne(r, insn, op); }
 
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
     if (!handled || (insn.mnemonic == M::Invalid && insn.rawName == nullptr)) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
