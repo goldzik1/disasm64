@@ -18,11 +18,14 @@ movzx/movsx/movsxd, the jcc/setcc/cmovcc families, call/jmp/ret, string ops, bit
 (bt/bts/btr/btc), bswap/xadd/cmpxchg, and the full ModRM / SIB / displacement /
 RIP-relative addressing that goes with them — plus `endbr64` and friends.
 
-A curated slice of SSE is in too: the move and logic family
-(movups/movaps/movdqa/movdqu, movss/movsd, movd/movq, pxor, xorps), scalar and packed
-arithmetic (add/mul/sub/div/sqrt in ps/pd/ss/sd), and ucomiss/comisd — with xmm
-operands and the right scalar-vs-packed memory sizes. Their **AVX (VEX)** forms decode
-too — the three-operand `vaddss xmm0, xmm1, xmm2`, ymm operands, the lot.
+A broad slice of SSE is in too: the move and logic families
+(movups/movaps/movdqa/movdqu, movss/movsd, movd/movq, pxor/por/pand/andps…), scalar
+and packed arithmetic (add/mul/sub/div/sqrt/min/max in ps/pd/ss/sd), compares
+(cmpps/cmpss, ucomiss/comisd), conversions (cvtsi2ss, cvttsd2si, cvtss2sd, cvtdq2ps…),
+packed integer (padd/psub b/w/d/q, pcmpeq/pcmpgt), shuffles (pshufd/shufps),
+unpack, and movmskps/pmovmskb — with xmm operands and correct scalar-vs-packed memory
+sizes. Every one of those has its **AVX (VEX)** form too — the three-operand
+`vaddss xmm0, xmm1, xmm2`, ymm operands, 2- and 3-byte VEX, the lot.
 
 Instruction length is byte-exact, and the decoder is fuzzed to never crash, hang, or
 return a nonsense length on arbitrary input (millions of random decodes, zero anomalies).
@@ -77,10 +80,11 @@ just a printer.
 Being built in stages; the general-purpose core plus the SSE slice above is the
 foundation.
 
-- **Broaden SSE + AVX.** VEX decoding works for the covered opcodes; the rest of the
-  SSE/AVX maps (shuffles, conversions, the FMA/AVX2 integer ops) come next, emitted
-  from a permissive open ISA dataset and committed so the build stays dependency-free —
-  the engine, operand model, and formatter stay hand-written.
+- **The 0F38 / 0F3A maps.** SSSE3/SSE4 and AVX2 (pshufb, pblendw, ptest, pmovzx,
+  roundps, the pcmpistri family…) live in the three-byte maps; those and their VEX
+  forms come next, emitted from a permissive open ISA dataset and committed so the
+  build stays dependency-free — the engine, operand model, and formatter stay
+  hand-written.
 - **Semantic metadata.** Per-instruction flags read/written, implicit operands,
   per-operand read/write access, and ISA-set / category.
 - **RE layer.** A full hook/trampoline helper on top of `relocate`, an anti-disassembly
