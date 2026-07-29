@@ -63,6 +63,11 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op >= 0x90 && op <= 0x9F) { Operand e; decodeModRM(r, p, 1, e); insn.mnemonic = M::Setcc; insn.cc = op & 0xF; addOp(insn, e); return true; }
     if (op == 0xB6 || op == 0xB7) { int es = (op == 0xB6) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movzx; addOp(insn, x.g); addOp(insn, x.e); return true; }
     if (op == 0xBE || op == 0xBF) { int es = (op == 0xBE) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movsx; addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if (op == 0xB0 || op == 0xB1) { int s = op == 0xB0 ? 1 : SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = M::Cmpxchg; addOp(insn, x.e); addOp(insn, x.g); return true; }
+    if (op == 0xC0 || op == 0xC1) { int s = op == 0xC0 ? 1 : SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = M::Xadd; addOp(insn, x.e); addOp(insn, x.g); return true; }
+    if (op == 0xA3 || op == 0xAB || op == 0xB3 || op == 0xBB) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = op == 0xA3 ? M::Bt : op == 0xAB ? M::Bts : op == 0xB3 ? M::Btr : M::Btc; addOp(insn, x.e); addOp(insn, x.g); return true; }
+    if (op == 0xBA) { int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); M mm = (reg & 7) == 4 ? M::Bt : (reg & 7) == 5 ? M::Bts : (reg & 7) == 6 ? M::Btr : (reg & 7) == 7 ? M::Btc : M::Invalid; insn.mnemonic = mm; addOp(insn, e); addOp(insn, immOp(r, 1)); return mm != M::Invalid; }
+    if (op >= 0xC8 && op <= 0xCF) { insn.mnemonic = M::Bswap; addOp(insn, regOp(makeGpr((op - 0xC8) | (p.rexB ? 8 : 0), SZv(p), p.rex))); return true; }
 
     // SSE (curated subset). Mandatory prefix selects the variant: none/66/F3/F2.
     const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;
@@ -147,6 +152,15 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
             int s = SZv(p); insn.mnemonic = M::Xchg; addOp(insn, regOp(makeGpr(0, s, p.rex))); addOp(insn, regOp(makeGpr((op - 0x90) | (p.rexB ? 8 : 0), s, p.rex))); return true; }
         case 0x98: insn.mnemonic = p.rexW ? M::Cdqe : M::Cwde; return true;
         case 0x99: insn.mnemonic = p.rexW ? M::Cqo : M::Cdq; return true;
+        case 0xA0: case 0xA1: case 0xA2: case 0xA3: {
+            int s = (op == 0xA0 || op == 0xA2) ? 1 : SZv(p);
+            Operand mo; mo.kind = OperandKind::Mem; mo.sizeBytes = uint8_t(s); mo.mem.dispOffset = uint8_t(r.pos); mo.mem.disp = int64_t(r.u64());
+            Operand reg = regOp(makeGpr(0, s, p.rex));
+            insn.mnemonic = M::Mov;
+            if (op == 0xA0 || op == 0xA1) { addOp(insn, reg); addOp(insn, mo); }
+            else { addOp(insn, mo); addOp(insn, reg); }
+            return true;
+        }
         case 0xA8: insn.mnemonic = M::Test; addOp(insn, regOp(makeGpr(0, 1, p.rex))); addOp(insn, immOp(r, 1)); return true;
         case 0xA9: { int s = SZv(p); insn.mnemonic = M::Test; addOp(insn, regOp(makeGpr(0, s, p.rex))); addOp(insn, immOp(r, SZz(p))); return true; }
         case 0xB0: case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: case 0xB7:
