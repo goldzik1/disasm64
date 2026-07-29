@@ -55,6 +55,29 @@ bool decodePrefixes(Reader& r, Prefixes& pfx) {
         return r.ok();
     }
 
+    if (!haveRex && !pfx.opsize && pfx.rep == 0 && !pfx.lock && b == 0x62) {   // EVEX (62h)
+        r.u8();
+        uint8_t p0 = r.u8(), p1 = r.u8(), p2 = r.u8();
+        pfx.evex = true;
+        pfx.rexR = !(p0 & 0x80);
+        pfx.rexX = !(p0 & 0x40);
+        pfx.rexB = !(p0 & 0x20);
+        pfx.evexRp = !(p0 & 0x10);
+        pfx.vexMap = p0 & 0x07;                 // mmm
+        pfx.rexW = (p1 & 0x80) != 0;
+        pfx.vexW = pfx.rexW;
+        pfx.vexPP = p1 & 0x03;
+        pfx.evexZ = (p2 & 0x80) != 0;
+        pfx.evexLL = (p2 >> 5) & 0x03;
+        pfx.evexB = (p2 & 0x10) != 0;
+        bool vprime = !(p2 & 0x08);
+        pfx.evexMask = p2 & 0x07;
+        pfx.vexVVVV = uint8_t(((~(p1 >> 3)) & 0x0F) | (vprime ? 0x10 : 0));
+        pfx.vexL = pfx.evexLL == 1;
+        pfx.rex = true;
+        return r.ok();
+    }
+
     if (haveRex) {
         pfx.rex = true;
         pfx.rexW = (rexByte >> 3) & 1;

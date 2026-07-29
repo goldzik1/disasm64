@@ -5,7 +5,7 @@
 namespace disasm64 {
 
 enum class RegClass : uint8_t {
-    None, Gpr8, Gpr8Hi, Gpr16, Gpr32, Gpr64, Xmm, Ymm, Sreg, Rip, St, Cr, Dr
+    None, Gpr8, Gpr8Hi, Gpr16, Gpr32, Gpr64, Xmm, Ymm, Sreg, Rip, St, Cr, Dr, Zmm, K
 };
 
 struct Reg {
@@ -50,9 +50,15 @@ struct Prefixes {
     bool vex = false;
     uint8_t vexMap = 0;       // 1=0F 2=0F38 3=0F3A
     uint8_t vexPP = 0;        // 0=none 1=66 2=F3 3=F2
-    uint8_t vexVVVV = 0;
+    uint8_t vexVVVV = 0;      // VEX: 4-bit; EVEX: 5-bit (V' extends)
     bool vexL = false;        // 0=xmm 1=ymm
     bool vexW = false;
+    bool evex = false;
+    uint8_t evexLL = 0;       // vector length: 0=128 1=256 2=512
+    uint8_t evexMask = 0;     // aaa: mask register k0..k7 (0 = none)
+    bool evexZ = false;       // {z} zeroing
+    bool evexB = false;       // broadcast / embedded rounding / sae
+    bool evexRp = false;      // R': high bit (16) of the modrm.reg register number
 };
 
 enum class Mnemonic : uint16_t {

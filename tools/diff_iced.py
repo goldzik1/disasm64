@@ -87,6 +87,16 @@ def gen_structured():
     for op in range(0xD8, 0xE0):
         for m in MODRMS:
             add(bytes([op, m, 0x11, 0x22, 0x33]))
+    # EVEX (map 1) -- exercise the AVX-512 core: various length/W/pp/mask
+    for W in (0, 1):
+        for pp in range(4):
+            for LL in (0, 1, 2):
+                for z, aaa in ((0, 0), (1, 1)):
+                    p1 = (W << 7) | 0x78 | 0x04 | pp        # vvvv=1111, fixed bit, pp
+                    p2 = (z << 7) | (LL << 5) | 0x08 | aaa  # V'=1, no broadcast
+                    for op in range(256):
+                        for m in (0xC1, 0x04):
+                            add(bytes([0x62, 0xF1, p1, p2, op, m, 0x02, 0x11, 0x22, 0x33]))
     return out
 
 

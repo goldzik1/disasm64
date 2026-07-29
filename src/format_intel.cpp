@@ -27,6 +27,8 @@ std::string regName(const Reg& r) {
         case RegClass::Gpr8Hi: return kGpr8Hi[r.idx & 7];
         case RegClass::Xmm:   return "xmm" + std::to_string(r.idx);
         case RegClass::Ymm:   return "ymm" + std::to_string(r.idx);
+        case RegClass::Zmm:   return "zmm" + std::to_string(r.idx);
+        case RegClass::K:     return "k" + std::to_string(r.idx);
         case RegClass::Rip:   return "rip";
         case RegClass::St:    return "st(" + std::to_string(r.idx) + ")";
         case RegClass::Sreg:  return r.idx < 6 ? kSeg[r.idx] : "?";
@@ -182,9 +184,19 @@ std::string formatIntel(const Instruction& insn) {
     else if (strOp && insn.prefixes.rep == 0xF2) s += "repne ";
     if (insn.prefixes.vex) s += "v";
     s += mnemStr(insn);
+    const Prefixes& pf = insn.prefixes;
     for (int i = 0; i < insn.operandCount; ++i) {
         s += (i == 0) ? " " : ", ";
         s += operandStr(insn.operands[i]);
+        if (pf.evex && i == 0) {                     // EVEX writemask on the destination
+            if (pf.evexMask) s += "{k" + std::to_string(pf.evexMask) + "}";
+            if (pf.evexZ) s += "{z}";
+        }
+        if (pf.evex && pf.evexB && insn.operands[i].kind == OperandKind::Mem) {   // broadcast
+            int vsz = pf.evexLL == 2 ? 64 : pf.evexLL == 1 ? 32 : 16;
+            int elem = pf.vexW ? 8 : 4;
+            s += "{1to" + std::to_string(vsz / elem) + "}";
+        }
     }
     return s;
 }

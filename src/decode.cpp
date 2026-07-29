@@ -787,6 +787,82 @@ bool decodeVex(Reader& r, Instruction& insn) {
     }
 }
 
+// AVX-512 EVEX core (map 1). Vector length from L'L, full 32-register numbering, disp8*N,
+// and {k}{z}/broadcast carried on the prefix for the formatter. Covers the common
+// F/BW/DQ families that mirror the VEX encodings.
+bool decodeEvex(Reader& r, Instruction& insn) {
+    const Prefixes& p = insn.prefixes;
+    if (p.vexMap < 1 || p.vexMap > 3) return false;
+    uint8_t op = r.u8();
+    const int pp = p.vexPP;
+    const int ll = p.evexLL;
+    const RegClass vc = ll == 2 ? RegClass::Zmm : ll == 1 ? RegClass::Ymm : RegClass::Xmm;
+    const int vsz = ll == 2 ? 64 : ll == 1 ? 32 : 16;
+    const int elem = p.rexW ? 8 : 4;
+    auto vreg = [&](int idx) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = vc; o.reg.idx = uint8_t(idx); o.sizeBytes = uint8_t(vsz); return o; };
+    auto rmVec = [&](int baseN, Operand& rm) -> int {
+        int reg = decodeModRM(r, p, vsz, rm, vc) | (p.evexRp ? 16 : 0);
+        if (rm.kind == OperandKind::Reg) rm.reg.idx = uint8_t(rm.reg.idx | (p.rexX ? 16 : 0));
+        else if (rm.mem.dispSize == 1) rm.mem.disp *= (p.evexB ? elem : baseN);
+        return reg;
+    };
+    auto two = [&](const char* nm, int baseN) { Operand rm; int reg = rmVec(baseN, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, rm); };
+    auto store = [&](const char* nm, int baseN) { Operand rm; int reg = rmVec(baseN, rm); insn.rawName = nm; addOp(insn, rm); addOp(insn, vreg(reg)); };
+    auto three = [&](const char* nm, int baseN) { Operand rm; int reg = rmVec(baseN, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); };
+    auto twoImm = [&](const char* nm, int baseN) { Operand rm; int reg = rmVec(baseN, rm); insn.rawName = nm; addOp(insn, vreg(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); };
+    const int sc = pp == 2 ? 4 : pp == 3 ? 8 : vsz;   // scalar element vs full-vector mem
+
+    if (p.vexMap != 1) return false;                  // v1: map 1 only
+    switch (op) {
+        case 0x10: case 0x11: {
+            const char* nm = pp == 0 ? "vmovups" : pp == 1 ? "vmovupd" : pp == 2 ? "vmovss" : "vmovsd";
+            if (op == 0x10) two(nm, sc); else store(nm, sc); return true;
+        }
+        case 0x28: case 0x29: { if (pp >= 2) return false; const char* nm = pp == 1 ? "vmovapd" : "vmovaps"; if (op == 0x28) two(nm, vsz); else store(nm, vsz); return true; }
+        case 0x6F: case 0x7F: {
+            const char* nm = pp == 1 ? (p.rexW ? "vmovdqa64" : "vmovdqa32")
+                           : pp == 2 ? (p.rexW ? "vmovdqu64" : "vmovdqu32")
+                           : pp == 3 ? (p.rexW ? "vmovdqu16" : "vmovdqu8") : nullptr;
+            if (!nm) return false;
+            if (op == 0x6F) two(nm, vsz); else store(nm, vsz); return true;
+        }
+        case 0x58: three(pp == 1 ? "vaddpd" : pp == 2 ? "vaddss" : pp == 3 ? "vaddsd" : "vaddps", sc); return true;
+        case 0x59: three(pp == 1 ? "vmulpd" : pp == 2 ? "vmulss" : pp == 3 ? "vmulsd" : "vmulps", sc); return true;
+        case 0x5C: three(pp == 1 ? "vsubpd" : pp == 2 ? "vsubss" : pp == 3 ? "vsubsd" : "vsubps", sc); return true;
+        case 0x5E: three(pp == 1 ? "vdivpd" : pp == 2 ? "vdivss" : pp == 3 ? "vdivsd" : "vdivps", sc); return true;
+        case 0x5D: three(pp == 1 ? "vminpd" : pp == 2 ? "vminss" : pp == 3 ? "vminsd" : "vminps", sc); return true;
+        case 0x5F: three(pp == 1 ? "vmaxpd" : pp == 2 ? "vmaxss" : pp == 3 ? "vmaxsd" : "vmaxps", sc); return true;
+        case 0x51: if (pp >= 2) three(pp == 2 ? "vsqrtss" : "vsqrtsd", sc); else two(pp == 1 ? "vsqrtpd" : "vsqrtps", vsz); return true;
+        case 0x54: if (pp >= 2) return false; three(pp == 1 ? "vandpd" : "vandps", vsz); return true;
+        case 0x55: if (pp >= 2) return false; three(pp == 1 ? "vandnpd" : "vandnps", vsz); return true;
+        case 0x56: if (pp >= 2) return false; three(pp == 1 ? "vorpd" : "vorps", vsz); return true;
+        case 0x57: if (pp >= 2) return false; three(pp == 1 ? "vxorpd" : "vxorps", vsz); return true;
+        case 0x2E: if (pp >= 2) return false; two(pp == 1 ? "vucomisd" : "vucomiss", pp == 1 ? 8 : 4); return true;
+        case 0x2F: if (pp >= 2) return false; two(pp == 1 ? "vcomisd" : "vcomiss", pp == 1 ? 8 : 4); return true;
+        case 0xEF: if (pp != 1) return false; three(p.rexW ? "vpxorq" : "vpxord", vsz); return true;
+        case 0xDB: if (pp != 1) return false; three(p.rexW ? "vpandq" : "vpandd", vsz); return true;
+        case 0xDF: if (pp != 1) return false; three(p.rexW ? "vpandnq" : "vpandnd", vsz); return true;
+        case 0xEB: if (pp != 1) return false; three(p.rexW ? "vporq" : "vpord", vsz); return true;
+        case 0xFE: if (pp != 1) return false; three("vpaddd", vsz); return true;
+        case 0xD4: if (pp != 1) return false; three("vpaddq", vsz); return true;
+        case 0xFA: if (pp != 1) return false; three("vpsubd", vsz); return true;
+        case 0xFB: if (pp != 1) return false; three("vpsubq", vsz); return true;
+        case 0xFC: if (pp != 1) return false; three("vpaddb", vsz); return true;
+        case 0xFD: if (pp != 1) return false; three("vpaddw", vsz); return true;
+        case 0xF8: if (pp != 1) return false; three("vpsubb", vsz); return true;
+        case 0xF9: if (pp != 1) return false; three("vpsubw", vsz); return true;
+        case 0x70: if (pp != 1) return false; twoImm("vpshufd", vsz); return true;
+        case 0x6E: { if (pp != 1) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm) | (p.evexRp ? 16 : 0); insn.rawName = p.rexW ? "vmovq" : "vmovd"; addOp(insn, vreg(reg)); addOp(insn, rm); return true; }
+        case 0x7E: {
+            if (pp == 2) { two("vmovq", 8); return true; }
+            if (pp == 1) { int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm) | (p.evexRp ? 16 : 0); insn.rawName = p.rexW ? "vmovq" : "vmovd"; addOp(insn, rm); addOp(insn, vreg(reg)); return true; }
+            return false;
+        }
+        case 0x5A: if (pp >= 2) three(pp == 2 ? "vcvtss2sd" : "vcvtsd2ss", sc); else two(pp == 1 ? "vcvtpd2ps" : "vcvtps2pd", vsz); return true;
+        default: return false;
+    }
+}
+
 uint8_t ccFlags(uint8_t cc) {
     switch (cc & 0xE) {
         case 0x0: return EF_OF;
@@ -860,7 +936,8 @@ DecodeResult decode(const uint8_t* p, size_t n, uint64_t address) {
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
 
     bool handled;
-    if (insn.prefixes.vex) handled = decodeVex(r, insn);
+    if (insn.prefixes.evex) handled = decodeEvex(r, insn);
+    else if (insn.prefixes.vex) handled = decodeVex(r, insn);
     else { uint8_t op = r.u8(); handled = (op == 0x0F) ? decode0F(r, insn) : (op >= 0xD8 && op <= 0xDF) ? decodeX87(r, insn, op) : decodeOne(r, insn, op); }
 
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }

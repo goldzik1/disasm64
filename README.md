@@ -47,6 +47,11 @@ two-, and three-byte (`0F38`/`0F3A`) maps. Every one of these has its **AVX (VEX
 too: three-operand `vaddss xmm0, xmm1, xmm2`, `vpshufb ymm0, ymm0, ymm1`, ymm operands,
 2- and 3-byte VEX.
 
+And the **AVX-512 core over EVEX** (the `62h` prefix): the AVX-512F/BW/DQ arithmetic,
+logic, move, compare and convert families on `zmm`/`ymm`/`xmm`, with the full 32-register
+file, a writemask and zeroing (`vaddps zmm1{k1}{z}, zmm2, zmm3`), broadcast (`{1to16}`),
+and `disp8*N` compressed displacement decoded to the right byte-exact length.
+
 The **x87 FPU** — the full `D8`–`DF` map, both the memory forms (`fld`/`fst`/`fadd`/
 `fild`/`fbld` sized down to `tbyte ptr`) and the `mod == 3` register forms: the `st(i)`
 arithmetic, `fcmov*`, `fucomi`/`fcomi`, the load-constant and transcendental group
@@ -148,11 +153,12 @@ the CLI surfaces them with `--flags`, and `--att` switches syntax.
 
 - Richer semantic metadata: implicit operands, per-operand read/write access,
   ISA-set / category.
-- AVX-512 / EVEX, emitted from a permissive open ISA dataset and committed so the build
-  stays dependency-free.
+- Extend EVEX beyond the map-1 core: the `0F38`/`0F3A` AVX-512 maps, gather/scatter, the
+  mask-register (`k`) instruction set, and embedded rounding `{er}`/`{sae}`.
 - Fold the iced-x86 differential into CI and widen it to mnemonic/operand agreement, not
   just length and validity.
 
 ## Scope
 
-x86-64 long mode, Intel and AT&T syntax. AVX-512 / EVEX is out of scope for now.
+x86-64 long mode, Intel and AT&T syntax. AVX-512 covers the EVEX map-1 core; the `0F38`/
+`0F3A` AVX-512 maps and gather/scatter are still on the roadmap.
