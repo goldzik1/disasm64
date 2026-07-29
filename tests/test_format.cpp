@@ -55,6 +55,10 @@ TEST_MAIN({
     CHECK_STR(fmt({0x66, 0x0F, 0xDB, 0xC1}), "pand xmm0, xmm1");
     CHECK_STR(fmt({0x0F, 0x54, 0xC1}), "andps xmm0, xmm1");
     CHECK_STR(fmt({0x66, 0x0F, 0x56, 0xC1}), "orpd xmm0, xmm1");
+    // VEX / AVX
+    CHECK_STR(fmt({0xC5, 0xF0, 0x57, 0xC2}), "vxorps xmm0, xmm1, xmm2");
+    CHECK_STR(fmt({0xC5, 0xF2, 0x58, 0xC2}), "vaddss xmm0, xmm1, xmm2");
+    CHECK_STR(fmt({0xC5, 0x84, 0x28, 0x00}), "vmovaps ymm0, ymmword ptr [rax]");
 })
 
 

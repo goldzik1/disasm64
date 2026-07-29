@@ -148,6 +148,7 @@ std::string formatIntel(const Instruction& insn) {
                        m == Mnemonic::Scas || m == Mnemonic::Cmps;
     if (strOp && insn.prefixes.rep == 0xF3) s += "rep ";
     else if (strOp && insn.prefixes.rep == 0xF2) s += "repne ";
+    if (insn.prefixes.vex) s += "v";
     s += mnemStr(insn);
     for (int i = 0; i < insn.operandCount; ++i) {
         s += (i == 0) ? " " : ", ";

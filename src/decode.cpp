@@ -231,6 +231,47 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
     return false;
 }
 
+bool decodeVex(Reader& r, Instruction& insn) {
+    const Prefixes& p = insn.prefixes;
+    if (p.vexMap != 1) return false;   // 0F map only
+    uint8_t op = r.u8();
+    const int pp = p.vexPP;            // 0 none 1=66 2=F3 3=F2
+    const RegClass vc = p.vexL ? RegClass::Ymm : RegClass::Xmm;
+    const int vsz = p.vexL ? 32 : 16;
+    auto vreg = [&](int idx) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = vc; o.reg.idx = uint8_t(idx); o.sizeBytes = uint8_t(vsz); return o; };
+    auto rmVec = [&](int memSz, Operand& rm) { int reg = decodeModRM(r, p, memSz, rm, vc); if (rm.kind == OperandKind::Reg) rm.sizeBytes = uint8_t(vsz); return reg; };
+    auto three = [&](M base, int memSz) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = base; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); };
+    auto two = [&](M m, int memSz, bool store) { Operand rm; int reg = rmVec(memSz, rm); insn.mnemonic = m; if (store) { addOp(insn, rm); addOp(insn, vreg(reg)); } else { addOp(insn, vreg(reg)); addOp(insn, rm); } };
+    const int sc = (pp == 2) ? 4 : (pp == 3) ? 8 : vsz;   // scalar/packed mem size
+
+    switch (op) {
+        case 0x10: case 0x11: { M m = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd; two(m, sc, op == 0x11); return true; }
+        case 0x28: case 0x29: if (pp >= 2) return false; two(pp == 1 ? M::Movapd : M::Movaps, vsz, op == 0x29); return true;
+        case 0x6F: case 0x7F: if (pp != 1 && pp != 2) return false; two(pp == 1 ? M::Movdqa : M::Movdqu, vsz, op == 0x7F); return true;
+        case 0x54: if (pp >= 2) return false; three(M(int(M::Andps) + pp), vsz); return true;
+        case 0x55: if (pp >= 2) return false; three(M(int(M::Andnps) + pp), vsz); return true;
+        case 0x56: if (pp >= 2) return false; three(M(int(M::Orps) + pp), vsz); return true;
+        case 0x57: if (pp >= 2) return false; three(pp == 1 ? M::Xorpd : M::Xorps, vsz); return true;
+        case 0xDB: if (pp != 1) return false; three(M::Pand, vsz); return true;
+        case 0xDF: if (pp != 1) return false; three(M::Pandn, vsz); return true;
+        case 0xEB: if (pp != 1) return false; three(M::Por, vsz); return true;
+        case 0xEF: if (pp != 1) return false; three(M::Pxor, vsz); return true;
+        case 0x58: three(M(int(M::Addps) + pp), sc); return true;
+        case 0x59: three(M(int(M::Mulps) + pp), sc); return true;
+        case 0x5C: three(M(int(M::Subps) + pp), sc); return true;
+        case 0x5E: three(M(int(M::Divps) + pp), sc); return true;
+        case 0x2E: if (pp >= 2) return false; two(M(int(M::Ucomiss) + pp), pp == 1 ? 8 : 4, false); return true;
+        case 0x2F: if (pp >= 2) return false; two(M(int(M::Comiss) + pp), pp == 1 ? 8 : 4, false); return true;
+        case 0x6E: { if (pp != 1) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, vreg(reg)); addOp(insn, rm); return true; }
+        case 0x7E: {
+            if (pp == 2) { two(M::Movq, 8, false); return true; }
+            if (pp == 1) { int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, rm); addOp(insn, vreg(reg)); return true; }
+            return false;
+        }
+        default: return false;
+    }
+}
+
 void finalize(Reader& r, Instruction& insn) {
     insn.length = uint8_t(r.pos > 255 ? 255 : r.pos);
     for (int i = 0; i < insn.operandCount; ++i) {
@@ -252,10 +293,9 @@ DecodeResult decode(const uint8_t* p, size_t n, uint64_t address) {
     decodePrefixes(r, insn.prefixes);
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
 
-    if (insn.prefixes.vex) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
-
-    uint8_t op = r.u8();
-    bool handled = (op == 0x0F) ? decode0F(r, insn) : decodeOne(r, insn, op);
+    bool handled;
+    if (insn.prefixes.vex) handled = decodeVex(r, insn);
+    else { uint8_t op = r.u8(); handled = (op == 0x0F) ? decode0F(r, insn) : decodeOne(r, insn, op); }
 
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
     if (!handled || insn.mnemonic == M::Invalid) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
