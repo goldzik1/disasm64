@@ -62,6 +62,13 @@ static const SseEnt kPackedInt[] = {
 };
 const size_t kPackedIntN = sizeof(kPackedInt) / sizeof(kPackedInt[0]);
 
+const char* pshiftName(uint8_t op, int reg) {   // 0F 71/72/73 /r group
+    if (op == 0x71) return reg == 2 ? "psrlw" : reg == 4 ? "psraw" : reg == 6 ? "psllw" : nullptr;
+    if (op == 0x72) return reg == 2 ? "psrld" : reg == 4 ? "psrad" : reg == 6 ? "pslld" : nullptr;
+    if (op == 0x73) return reg == 2 ? "psrlq" : reg == 3 ? "psrldq" : reg == 6 ? "psllq" : reg == 7 ? "pslldq" : nullptr;
+    return nullptr;
+}
+
 bool decode0F38(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
     uint8_t op = r.u8();
@@ -149,6 +156,11 @@ bool decode0F(Reader& r, Instruction& insn) {
     };
     auto sseArith = [&](M base) { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16; insn.mnemonic = M(int(base) + pp); vecEG(msz, false); };
     if (pp == 1) { const char* nm = findSse(kPackedInt, kPackedIntN, op); if (nm) { Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.rawName = nm; addOp(insn, xmm(reg)); addOp(insn, rm); return true; } }
+    if (pp == 1 && (op == 0x71 || op == 0x72 || op == 0x73)) {
+        int reg = (r.peek() >> 3) & 7; const char* nm = pshiftName(op, reg); if (!nm) return false;
+        Operand rm; decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16;
+        insn.rawName = nm; addOp(insn, rm); addOp(insn, immOp(r, 1)); return true;
+    }
     switch (op) {
         case 0x58: sseArith(M::Addps); return true;
         case 0x59: sseArith(M::Mulps); return true;
@@ -381,6 +393,10 @@ bool decodeVex(Reader& r, Instruction& insn) {
     }
 
     if (pp == 1) { const char* nm = findSse(kPackedInt, kPackedIntN, op); if (nm) { threeRaw(nm); return true; } }
+    if (pp == 1 && (op == 0x71 || op == 0x72 || op == 0x73)) {
+        int reg = (r.peek() >> 3) & 7; const char* nm = pshiftName(op, reg); if (!nm) return false;
+        Operand rm; rmVec(vsz, rm); insn.rawName = nm; addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true;
+    }
     switch (op) {
         case 0x10: case 0x11: { M m = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd; two(m, sc, op == 0x11); return true; }
         case 0x28: case 0x29: if (pp >= 2) return false; two(pp == 1 ? M::Movapd : M::Movaps, vsz, op == 0x29); return true;
