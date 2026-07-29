@@ -3,28 +3,33 @@
 namespace disasm64 {
 
 bool decodePrefixes(Reader& r, Prefixes& pfx) {
+    // A REX byte is effective only when it is the last prefix before the opcode;
+    // any legacy prefix that follows it cancels it, and a later REX overrides.
+    uint8_t rexByte = 0; bool haveRex = false;
     for (;;) {
         if (r.remaining() == 0) return false;
         uint8_t b = r.peek();
         switch (b) {
-            case 0xF0: pfx.lock = true; r.u8(); continue;
-            case 0xF2: pfx.rep = 0xF2; r.u8(); continue;
-            case 0xF3: pfx.rep = 0xF3; r.u8(); continue;
-            case 0x2E: pfx.segment = 1; r.u8(); continue;   // CS
-            case 0x36: pfx.segment = 2; r.u8(); continue;   // SS
-            case 0x3E: pfx.segment = 3; r.u8(); continue;   // DS
-            case 0x26: pfx.segment = 0; r.u8(); continue;   // ES
-            case 0x64: pfx.segment = 4; r.u8(); continue;   // FS
-            case 0x65: pfx.segment = 5; r.u8(); continue;   // GS
-            case 0x66: pfx.opsize = true; r.u8(); continue;
-            case 0x67: pfx.addrsize = true; r.u8(); continue;
+            case 0xF0: pfx.lock = true; haveRex = false; r.u8(); continue;
+            case 0xF2: pfx.rep = 0xF2; haveRex = false; r.u8(); continue;
+            case 0xF3: pfx.rep = 0xF3; haveRex = false; r.u8(); continue;
+            case 0x2E: pfx.segment = 1; haveRex = false; r.u8(); continue;   // CS
+            case 0x36: pfx.segment = 2; haveRex = false; r.u8(); continue;   // SS
+            case 0x3E: pfx.segment = 3; haveRex = false; r.u8(); continue;   // DS
+            case 0x26: pfx.segment = 0; haveRex = false; r.u8(); continue;   // ES
+            case 0x64: pfx.segment = 4; haveRex = false; r.u8(); continue;   // FS
+            case 0x65: pfx.segment = 5; haveRex = false; r.u8(); continue;   // GS
+            case 0x66: pfx.opsize = true; haveRex = false; r.u8(); continue;
+            case 0x67: pfx.addrsize = true; haveRex = false; r.u8(); continue;
             default: break;
         }
+        if (b >= 0x40 && b <= 0x4F) { rexByte = b; haveRex = true; r.u8(); continue; }
         break;
     }
 
     uint8_t b = r.peek();
-    if (b == 0xC5 || b == 0xC4) {   // C4/C5 are always VEX in 64-bit
+    // VEX may not be preceded by REX or a 66/F2/F3/F0 prefix (those make it #UD).
+    if (!haveRex && !pfx.opsize && pfx.rep == 0 && !pfx.lock && (b == 0xC5 || b == 0xC4)) {
         pfx.vex = true;
         r.u8();
         if (b == 0xC5) {          // 2-byte VEX
@@ -50,13 +55,12 @@ bool decodePrefixes(Reader& r, Prefixes& pfx) {
         return r.ok();
     }
 
-    if (b >= 0x40 && b <= 0x4F) {
+    if (haveRex) {
         pfx.rex = true;
-        pfx.rexW = (b >> 3) & 1;
-        pfx.rexR = (b >> 2) & 1;
-        pfx.rexX = (b >> 1) & 1;
-        pfx.rexB = b & 1;
-        r.u8();
+        pfx.rexW = (rexByte >> 3) & 1;
+        pfx.rexR = (rexByte >> 2) & 1;
+        pfx.rexX = (rexByte >> 1) & 1;
+        pfx.rexB = rexByte & 1;
     }
     return r.ok();
 }

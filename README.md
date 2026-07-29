@@ -53,8 +53,25 @@ arithmetic, `fcmov*`, `fucomi`/`fcomi`, the load-constant and transcendental gro
 (`fld1`/`fldpi`/`fsin`/`fpatan`/`f2xm1`…), `fnstsw ax`, and the `fsub`/`fsubr` reg-form
 swap handled per the SDM.
 
-The decoder is fuzzed to never crash, hang, or return a nonsense length on arbitrary
-input — millions of random decodes, zero anomalies.
+The **system and privileged** layer that RE and hypervisor work actually hits: `mov` to/
+from `cr`/`dr`, the group-6/7 descriptor-table ops (`sgdt`/`lgdt`/`sidt`/`lidt`/`sldt`/
+`lldt`/`str`/`ltr`/`smsw`/`lmsw`/`invlpg`), `swapgs`, `rdtscp`, `wrmsr`/`rdmsr`/`rdpmc`,
+`sysenter`/`sysexit`/`sysret`, `vmread`/`vmwrite` and the `0F 01` VMX/SGX leaves
+(`vmcall`/`monitor`/`xgetbv`/`clac`…), `rdfsbase`/`wrgsbase`, `clts`, `invd`/`wbinvd`,
+`lar`/`lsl`, `lss`/`lfs`/`lgs`, `fxsave`/`xsave`/`clflushopt`. Plus the rest of the GP
+tail — `in`/`out`, string I/O, `loop`/`jrcxz`, `enter`/`leave`, far `call`/`jmp`,
+`shld`/`shrd`, `movnti`, `lahf`/`sahf` — and **SHA-NI**, `movq`, `haddpd`/`addsubps`,
+`rsqrtps`/`rcpps`, `cvtpd2dq`, `maskmovdqu`.
+
+The decoder rejects what the hardware rejects, too: `LOCK` only on a lockable op with a
+memory destination, `VEX.vvvv` required `1111` where there's no third operand, REX and
+`66`/`F2`/`F3` before `VEX` as `#UD`, `mov` to `CS`.
+
+**Validated two ways.** Fuzzed to never crash, hang, or return a nonsense length on
+arbitrary input — millions of random decodes, zero anomalies. And **differentially
+checked against [iced-x86](https://github.com/icedland/iced)** (`tools/diff_iced.py`):
+random + structured byte streams are decoded by both and compared — instruction **length
+matches on every valid instruction**, with validity agreement across millions of samples.
 
 ## The RE layer
 
@@ -95,7 +112,8 @@ ctest --test-dir build
 ```
 
 C++17, no dependencies, builds with MSVC or gcc/clang. Regenerate the single header with
-`tools/amalgamate.sh` after editing the split sources.
+`tools/amalgamate.sh` after editing the split sources. The optional differential test needs
+only `pip install iced-x86`, then `python tools/diff_iced.py --tool build/difftool`.
 
 ## The model
 
@@ -113,7 +131,8 @@ the CLI surfaces them with `--flags`, and `--att` switches syntax.
   ISA-set / category.
 - AVX-512 / EVEX, emitted from a permissive open ISA dataset and committed so the build
   stays dependency-free.
-- External differential validation against `llvm-mc` over a large corpus.
+- Fold the iced-x86 differential into CI and widen it to mnemonic/operand agreement, not
+  just length and validity.
 
 ## Scope
 

@@ -7,7 +7,7 @@
 namespace disasm64 {
 
 enum class RegClass : uint8_t {
-    None, Gpr8, Gpr8Hi, Gpr16, Gpr32, Gpr64, Xmm, Ymm, Sreg, Rip, St
+    None, Gpr8, Gpr8Hi, Gpr16, Gpr32, Gpr64, Xmm, Ymm, Sreg, Rip, St, Cr, Dr
 };
 
 struct Reg {
@@ -220,28 +220,33 @@ std::vector<SweepIssue> antiDisasmScan(const uint8_t* p, size_t n, uint64_t base
 namespace disasm64 {
 
 bool decodePrefixes(Reader& r, Prefixes& pfx) {
+    // A REX byte is effective only when it is the last prefix before the opcode;
+    // any legacy prefix that follows it cancels it, and a later REX overrides.
+    uint8_t rexByte = 0; bool haveRex = false;
     for (;;) {
         if (r.remaining() == 0) return false;
         uint8_t b = r.peek();
         switch (b) {
-            case 0xF0: pfx.lock = true; r.u8(); continue;
-            case 0xF2: pfx.rep = 0xF2; r.u8(); continue;
-            case 0xF3: pfx.rep = 0xF3; r.u8(); continue;
-            case 0x2E: pfx.segment = 1; r.u8(); continue;   // CS
-            case 0x36: pfx.segment = 2; r.u8(); continue;   // SS
-            case 0x3E: pfx.segment = 3; r.u8(); continue;   // DS
-            case 0x26: pfx.segment = 0; r.u8(); continue;   // ES
-            case 0x64: pfx.segment = 4; r.u8(); continue;   // FS
-            case 0x65: pfx.segment = 5; r.u8(); continue;   // GS
-            case 0x66: pfx.opsize = true; r.u8(); continue;
-            case 0x67: pfx.addrsize = true; r.u8(); continue;
+            case 0xF0: pfx.lock = true; haveRex = false; r.u8(); continue;
+            case 0xF2: pfx.rep = 0xF2; haveRex = false; r.u8(); continue;
+            case 0xF3: pfx.rep = 0xF3; haveRex = false; r.u8(); continue;
+            case 0x2E: pfx.segment = 1; haveRex = false; r.u8(); continue;   // CS
+            case 0x36: pfx.segment = 2; haveRex = false; r.u8(); continue;   // SS
+            case 0x3E: pfx.segment = 3; haveRex = false; r.u8(); continue;   // DS
+            case 0x26: pfx.segment = 0; haveRex = false; r.u8(); continue;   // ES
+            case 0x64: pfx.segment = 4; haveRex = false; r.u8(); continue;   // FS
+            case 0x65: pfx.segment = 5; haveRex = false; r.u8(); continue;   // GS
+            case 0x66: pfx.opsize = true; haveRex = false; r.u8(); continue;
+            case 0x67: pfx.addrsize = true; haveRex = false; r.u8(); continue;
             default: break;
         }
+        if (b >= 0x40 && b <= 0x4F) { rexByte = b; haveRex = true; r.u8(); continue; }
         break;
     }
 
     uint8_t b = r.peek();
-    if (b == 0xC5 || b == 0xC4) {   // C4/C5 are always VEX in 64-bit
+    // VEX may not be preceded by REX or a 66/F2/F3/F0 prefix (those make it #UD).
+    if (!haveRex && !pfx.opsize && pfx.rep == 0 && !pfx.lock && (b == 0xC5 || b == 0xC4)) {
         pfx.vex = true;
         r.u8();
         if (b == 0xC5) {          // 2-byte VEX
@@ -267,13 +272,12 @@ bool decodePrefixes(Reader& r, Prefixes& pfx) {
         return r.ok();
     }
 
-    if (b >= 0x40 && b <= 0x4F) {
+    if (haveRex) {
         pfx.rex = true;
-        pfx.rexW = (b >> 3) & 1;
-        pfx.rexR = (b >> 2) & 1;
-        pfx.rexX = (b >> 1) & 1;
-        pfx.rexB = b & 1;
-        r.u8();
+        pfx.rexW = (rexByte >> 3) & 1;
+        pfx.rexR = (rexByte >> 2) & 1;
+        pfx.rexX = (rexByte >> 1) & 1;
+        pfx.rexB = rexByte & 1;
     }
     return r.ok();
 }
@@ -364,7 +368,7 @@ const M kGrp2[8] = {M::Rol, M::Ror, M::Rcl, M::Rcr, M::Shl, M::Shr, M::Shl, M::S
 const M kGrp3[8] = {M::Test, M::Test, M::Not, M::Neg, M::Mul, M::Imul, M::Div, M::Idiv};
 
 int SZv(const Prefixes& p) { return p.rexW ? 8 : (p.opsize ? 2 : 4); }
-int SZz(const Prefixes& p) { return p.opsize ? 2 : 4; }
+int SZz(const Prefixes& p) { return p.rexW ? 4 : (p.opsize ? 2 : 4); }
 int SZd64(const Prefixes& p) { return p.opsize ? 2 : 8; }
 
 int sizeOfClass(RegClass c) {
@@ -376,6 +380,8 @@ int sizeOfClass(RegClass c) {
         case RegClass::Xmm: return 16;
         case RegClass::Ymm: return 32;
         case RegClass::St: return 10;
+        case RegClass::Sreg: return 2;
+        case RegClass::Cr: case RegClass::Dr: return 8;
         default: return 0;
     }
 }
@@ -436,6 +442,11 @@ bool decode0F38(Reader& r, Instruction& insn) {
         if (op == 0xF0) { addOp(insn, regOp(makeGpr(reg, s, p.rex))); addOp(insn, rm); }
         else { addOp(insn, rm); addOp(insn, regOp(makeGpr(reg, s, p.rex))); }
         return true;
+    }
+    if (op >= 0xC8 && op <= 0xCD && p.rep == 0 && !p.opsize) {   // SHA-NI
+        static const char* n[] = {"sha1nexte","sha1msg1","sha1msg2","sha256rnds2","sha256msg1","sha256msg2"};
+        Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16;
+        insn.rawName = n[op - 0xC8]; addOp(insn, xmmReg(reg)); addOp(insn, rm); return true;
     }
     const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;
     if (pp != 1) return false;
@@ -501,13 +512,63 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op == 0x3A) return decode0F3A(r, insn);
     if (op == 0x05) { insn.mnemonic = M::Syscall; return true; }
     if (op == 0x0B) { insn.mnemonic = M::Ud2; return true; }
-    if (op == 0x1E) { if (p.rep == 0xF3) { uint8_t m = r.u8(); if (m == 0xFA) { insn.mnemonic = M::Endbr64; return true; } if (m == 0xFB) { insn.mnemonic = M::Endbr32; return true; } } return false; }
+    if (op == 0x1E && p.rep == 0xF3) { uint8_t m = r.peek(); if (m == 0xFA) { r.u8(); insn.mnemonic = M::Endbr64; return true; } if (m == 0xFB) { r.u8(); insn.mnemonic = M::Endbr32; return true; } }   // else falls through to reserved-nop
     if (op == 0x1F) { Operand e; decodeModRM(r, p, SZv(p), e); insn.mnemonic = M::Nop; addOp(insn, e); return true; }
     if (op == 0x31) { insn.mnemonic = M::Rdtsc; return true; }
+    if (op >= 0x20 && op <= 0x23) {   // mov r64, CR/DR and reverse (mod ignored, always 64-bit GPR)
+        uint8_t mb = r.u8();
+        int reg = ((mb >> 3) & 7) | (p.rexR ? 8 : 0);
+        int rm = (mb & 7) | (p.rexB ? 8 : 0);
+        Operand gpr = regOp(makeGpr(rm, 8, p.rex));
+        Operand ctl; ctl.kind = OperandKind::Reg; ctl.sizeBytes = 8;
+        ctl.reg.cls = (op == 0x21 || op == 0x23) ? RegClass::Dr : RegClass::Cr;
+        ctl.reg.idx = uint8_t(reg);
+        insn.mnemonic = M::Mov;
+        if (op == 0x20 || op == 0x21) { addOp(insn, gpr); addOp(insn, ctl); }
+        else { addOp(insn, ctl); addOp(insn, gpr); }
+        return true;
+    }
     if (op == 0xA2) { insn.mnemonic = M::Cpuid; return true; }
+    if (op == 0x02 || op == 0x03) { auto x = decodeEG(r, p, SZv(p), SZv(p)); insn.rawName = op == 0x02 ? "lar" : "lsl"; addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if (op == 0x06) { insn.rawName = "clts"; return true; }
+    if (op == 0x07) { insn.rawName = "sysret"; return true; }
+    if (op == 0x08) { insn.rawName = "invd"; return true; }
+    if (op == 0x09) { insn.rawName = "wbinvd"; return true; }
+    if (op == 0x37 && p.rep == 0 && !p.opsize) { insn.rawName = "getsec"; return true; }
+    if (op == 0xB2 || op == 0xB4 || op == 0xB5) { int s = SZv(p); auto x = decodeEG(r, p, s, s); if (x.e.kind != OperandKind::Mem) return false; insn.rawName = op == 0xB2 ? "lss" : op == 0xB4 ? "lfs" : "lgs"; addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if (op == 0xC3 && p.rep == 0 && !p.opsize) { int s = p.rexW ? 8 : 4; auto x = decodeEG(r, p, s, s); if (x.e.kind != OperandKind::Mem) return false; insn.rawName = "movnti"; addOp(insn, x.e); addOp(insn, x.g); return true; }
+    if (op == 0xB9 || op == 0xFF) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.rawName = op == 0xB9 ? "ud1" : "ud0"; addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if ((op == 0x78 || op == 0x79) && p.rep == 0 && !p.opsize) {
+        auto x = decodeEG(r, p, 8, 8); insn.rawName = op == 0x78 ? "vmread" : "vmwrite";
+        if (op == 0x78) { addOp(insn, x.e); addOp(insn, x.g); } else { addOp(insn, x.g); addOp(insn, x.e); }
+        return true;
+    }
+    if (op == 0x30) { insn.rawName = "wrmsr"; return true; }
+    if (op == 0x32) { insn.rawName = "rdmsr"; return true; }
+    if (op == 0x33) { insn.rawName = "rdpmc"; return true; }
+    if (op == 0x0E) { insn.rawName = "femms"; return true; }
+    if (op == 0x0D) { uint8_t m = r.peek(); int reg = (m >> 3) & 7; Operand e; decodeModRM(r, p, 1, e); insn.rawName = reg == 1 ? "prefetchw" : "prefetch"; addOp(insn, e); return true; }
+    if (op >= 0x18 && op <= 0x1E) {
+        uint8_t m = r.peek(); int reg = (m >> 3) & 7;
+        if (op == 0x18 && reg < 4) { static const char* n[] = {"prefetchnta","prefetcht0","prefetcht1","prefetcht2"}; Operand e; decodeModRM(r, p, 1, e); insn.rawName = n[reg]; addOp(insn, e); return true; }
+        Operand e; decodeModRM(r, p, SZv(p), e); insn.mnemonic = M::Nop; addOp(insn, e); return true;
+    }
+    if (op == 0x34) { insn.rawName = "sysenter"; return true; }
+    if (op == 0x35) { insn.rawName = "sysexit"; return true; }
+    if (op == 0xAA) { insn.rawName = "rsm"; return true; }
+    if (op == 0xA0 || op == 0xA1 || op == 0xA8 || op == 0xA9) {
+        Operand s; s.kind = OperandKind::Reg; s.reg.cls = RegClass::Sreg; s.reg.idx = uint8_t(op < 0xA8 ? 4 : 5); s.sizeBytes = 8;
+        insn.rawName = (op == 0xA0 || op == 0xA8) ? "push" : "pop"; addOp(insn, s); return true;
+    }
+    if (op == 0xA4 || op == 0xA5 || op == 0xAC || op == 0xAD) {
+        int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.rawName = (op == 0xA4 || op == 0xA5) ? "shld" : "shrd";
+        addOp(insn, x.e); addOp(insn, x.g);
+        if (op == 0xA4 || op == 0xAC) addOp(insn, immOp(r, 1)); else addOp(insn, clOp(p));
+        return true;
+    }
     if (op == 0xAF) { auto x = decodeEG(r, p, SZv(p), SZv(p)); insn.mnemonic = M::Imul; addOp(insn, x.g); addOp(insn, x.e); return true; }
     if (op >= 0x40 && op <= 0x4F) { auto x = decodeEG(r, p, SZv(p), SZv(p)); insn.mnemonic = M::Cmovcc; insn.cc = op & 0xF; addOp(insn, x.g); addOp(insn, x.e); return true; }
-    if (op >= 0x80 && op <= 0x8F) { insn.mnemonic = M::Jcc; insn.cc = op & 0xF; addOp(insn, relOp(r, SZz(p))); return true; }
+    if (op >= 0x80 && op <= 0x8F) { insn.mnemonic = M::Jcc; insn.cc = op & 0xF; addOp(insn, relOp(r, 4)); return true; }
     if (op >= 0x90 && op <= 0x9F) { Operand e; decodeModRM(r, p, 1, e); insn.mnemonic = M::Setcc; insn.cc = op & 0xF; addOp(insn, e); return true; }
     if (op == 0xB6 || op == 0xB7) { int es = (op == 0xB6) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movzx; addOp(insn, x.g); addOp(insn, x.e); return true; }
     if (op == 0xBE || op == 0xBF) { int es = (op == 0xBE) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movsx; addOp(insn, x.g); addOp(insn, x.e); return true; }
@@ -515,14 +576,59 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op == 0xB8 && p.rep == 0xF3) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.rawName = "popcnt"; addOp(insn, x.g); addOp(insn, x.e); return true; }
     if (op == 0xAE) {
         uint8_t m = r.peek();
-        if (m == 0xE8) { r.u8(); insn.rawName = "lfence"; return true; }
-        if (m == 0xF0) { r.u8(); insn.rawName = "mfence"; return true; }
-        if (m == 0xF8) { r.u8(); insn.rawName = "sfence"; return true; }
-        int reg = (m >> 3) & 7; const char* nm = reg == 2 ? "ldmxcsr" : reg == 3 ? "stmxcsr" : reg == 7 ? "clflush" : nullptr;
+        if (!p.opsize && !p.rep) {
+            if (m == 0xE8) { r.u8(); insn.rawName = "lfence"; return true; }
+            if (m == 0xF0) { r.u8(); insn.rawName = "mfence"; return true; }
+            if (m == 0xF8) { r.u8(); insn.rawName = "sfence"; return true; }
+        }
+        int reg = (m >> 3) & 7;
+        if (p.rep == 0xF3) {   // rd/wr fs/gs base -- register operand only
+            static const char* n[4] = {"rdfsbase","rdgsbase","wrfsbase","wrgsbase"};
+            if ((m >> 6) != 3 || reg > 3) return false;
+            Operand e; decodeModRM(r, p, p.rexW ? 8 : 4, e); insn.rawName = n[reg]; addOp(insn, e); return true;
+        }
+        if ((m >> 6) == 3) return false;   // remaining /r forms are all memory
+        const char* nm = nullptr; int sz = 0;
+        if (p.opsize) { nm = reg == 6 ? "clwb" : reg == 7 ? "clflushopt" : nullptr; sz = 1; }
+        else if (p.rep == 0) { static const char* n[8] = {"fxsave","fxrstor","ldmxcsr","stmxcsr","xsave","xrstor","xsaveopt","clflush"}; nm = n[reg]; sz = (reg == 2 || reg == 3) ? 4 : reg == 7 ? 1 : 0; }
         if (!nm) return false;
-        Operand rm; decodeModRM(r, p, 4, rm); insn.rawName = nm; addOp(insn, rm); return true;
+        Operand rm; decodeModRM(r, p, sz, rm); insn.rawName = nm; addOp(insn, rm); return true;
     }
-    if (op == 0x01) { if (r.peek() == 0xF9) { r.u8(); insn.rawName = "rdtscp"; return true; } return false; }
+    if (op == 0x00) {   // group 6
+        uint8_t mb = r.peek(); int reg = (mb >> 3) & 7, mod = mb >> 6;
+        static const char* n[8] = {"sldt","str","lldt","ltr","verr","verw",nullptr,nullptr};
+        if (!n[reg]) return false;
+        int sz = (mod == 3 && reg < 2) ? SZv(p) : 2;
+        Operand e; decodeModRM(r, p, sz, e); insn.rawName = n[reg]; addOp(insn, e); return true;
+    }
+    if (op == 0x01) {   // group 7 (+ register-form leaves)
+        uint8_t mb = r.peek(); int reg = (mb >> 3) & 7, mod = mb >> 6;
+        if (mod == 3) {
+            if (reg == 4) { Operand e; decodeModRM(r, p, SZv(p), e); insn.rawName = "smsw"; addOp(insn, e); return true; }
+            if (reg == 6) { Operand e; decodeModRM(r, p, 2, e); insn.rawName = "lmsw"; addOp(insn, e); return true; }
+            if (p.rep || p.opsize) return false;   // the no-operand leaves take no mandatory prefix
+            const char* nm = nullptr;
+            switch (mb) {
+                case 0xC0: nm = "enclv"; break;    case 0xC1: nm = "vmcall"; break;
+                case 0xC2: nm = "vmlaunch"; break;
+                case 0xC3: nm = "vmresume"; break; case 0xC4: nm = "vmxoff"; break;
+                case 0xC8: nm = "monitor"; break;  case 0xC9: nm = "mwait"; break;
+                case 0xCA: nm = "clac"; break;     case 0xCB: nm = "stac"; break;
+                case 0xCF: nm = "encls"; break;    case 0xD0: nm = "xgetbv"; break;
+                case 0xD1: nm = "xsetbv"; break;   case 0xD4: nm = "vmfunc"; break;
+                case 0xD5: nm = "xend"; break;     case 0xD6: nm = "xtest"; break;
+                case 0xD7: nm = "enclu"; break;    case 0xEE: nm = "rdpkru"; break;
+                case 0xEF: nm = "wrpkru"; break;   case 0xF8: nm = "swapgs"; break;
+                case 0xF9: nm = "rdtscp"; break;
+            }
+            if (!nm) return false;
+            r.u8(); insn.rawName = nm; return true;
+        }
+        static const char* n[8] = {"sgdt","sidt","lgdt","lidt","smsw",nullptr,"lmsw","invlpg"};
+        if (!n[reg]) return false;
+        int sz = (reg == 4 || reg == 6) ? 2 : 0;
+        Operand e; decodeModRM(r, p, sz, e); insn.rawName = n[reg]; addOp(insn, e); return true;
+    }
     if (op == 0xB0 || op == 0xB1) { int s = op == 0xB0 ? 1 : SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = M::Cmpxchg; addOp(insn, x.e); addOp(insn, x.g); return true; }
     if (op == 0xC0 || op == 0xC1) { int s = op == 0xC0 ? 1 : SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = M::Xadd; addOp(insn, x.e); addOp(insn, x.g); return true; }
     if (op == 0xA3 || op == 0xAB || op == 0xB3 || op == 0xBB) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = op == 0xA3 ? M::Bt : op == 0xAB ? M::Bts : op == 0xB3 ? M::Btr : M::Btc; addOp(insn, x.e); addOp(insn, x.g); return true; }
@@ -551,17 +657,22 @@ bool decode0F(Reader& r, Instruction& insn) {
         case 0x5C: sseArith(M::Subps); return true;
         case 0x5E: sseArith(M::Divps); return true;
         case 0x51: sseArith(M::Sqrtps); return true;
+        case 0x52: { if (pp == 1 || pp == 3) return false; insn.rawName = pp == 2 ? "rsqrtss" : "rsqrtps"; vecEG(pp == 2 ? 4 : 16, false); return true; }
+        case 0x53: { if (pp == 1 || pp == 3) return false; insn.rawName = pp == 2 ? "rcpss" : "rcpps"; vecEG(pp == 2 ? 4 : 16, false); return true; }
+        case 0x7C: { if (pp != 1 && pp != 3) return false; insn.rawName = pp == 1 ? "haddpd" : "haddps"; vecEG(16, false); return true; }
+        case 0x7D: { if (pp != 1 && pp != 3) return false; insn.rawName = pp == 1 ? "hsubpd" : "hsubps"; vecEG(16, false); return true; }
+        case 0xD0: { if (pp != 1 && pp != 3) return false; insn.rawName = pp == 1 ? "addsubpd" : "addsubps"; vecEG(16, false); return true; }
         case 0x5D: insn.mnemonic = M(int(M::Minps) + pp); vecEG(sc, false); return true;
         case 0x5F: insn.mnemonic = M(int(M::Maxps) + pp); vecEG(sc, false); return true;
         case 0xC2: { insn.mnemonic = M(int(M::Cmpps) + pp); Operand rm; int reg = decodeModRM(r, p, sc, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
         case 0xC4: { if (pp != 1) return false; int s = (r.peek() >> 6) == 3 ? 4 : 2; Operand rm; int reg = decodeModRM(r, p, s, rm); insn.rawName = "pinsrw"; addOp(insn, xmm(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
-        case 0xC5: { if (pp != 1) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.rawName = "pextrw"; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
+        case 0xC5: { if (pp != 1 || (r.peek() >> 6) != 3) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.rawName = "pextrw"; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
         case 0x14: if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Unpcklpd : M::Unpcklps; vecEG(16, false); return true;
         case 0x15: if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Unpckhpd : M::Unpckhps; vecEG(16, false); return true;
-        case 0x50: { if (pp >= 2) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 1 ? M::Movmskpd : M::Movmskps; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); return true; }
+        case 0x50: { if (pp >= 2 || (r.peek() >> 6) != 3) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 1 ? M::Movmskpd : M::Movmskps; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); return true; }
         case 0x70: { if (pp == 0) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 1 ? M::Pshufd : pp == 2 ? M::Pshufhw : M::Pshuflw; addOp(insn, xmm(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
         case 0xC6: { if (pp >= 2) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 1 ? M::Shufpd : M::Shufps; addOp(insn, xmm(reg)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true; }
-        case 0xD7: { if (pp != 1) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = M::Pmovmskb; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); return true; }
+        case 0xD7: { if (pp != 1 || (r.peek() >> 6) != 3) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = M::Pmovmskb; addOp(insn, regOp(makeGpr(reg, 4, p.rex))); addOp(insn, rm); return true; }
         case 0x2A: { if (pp != 2 && pp != 3) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = pp == 2 ? M::Cvtsi2ss : M::Cvtsi2sd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
         case 0x2C: case 0x2D: { if (pp != 2 && pp != 3) return false; int ms = pp == 2 ? 4 : 8; Operand rm; int reg = decodeModRM(r, p, ms, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; int gs = p.rexW ? 8 : 4; bool tr = op == 0x2C; insn.mnemonic = tr ? (pp == 2 ? M::Cvttss2si : M::Cvttsd2si) : (pp == 2 ? M::Cvtss2si : M::Cvtsd2si); addOp(insn, regOp(makeGpr(reg, gs, p.rex))); addOp(insn, rm); return true; }
         case 0x5A: { int ms = pp == 2 ? 4 : pp == 3 ? 8 : 16; Operand rm; int reg = decodeModRM(r, p, ms, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 2 ? M::Cvtss2sd : pp == 3 ? M::Cvtsd2ss : pp == 1 ? M::Cvtpd2ps : M::Cvtps2pd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
@@ -575,18 +686,23 @@ bool decode0F(Reader& r, Instruction& insn) {
             if (pp == 2) { insn.rawName = "movsldup"; vecEG(16, false); return true; }
             if (pp == 3) { insn.rawName = "movddup"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
             if ((r.peek() >> 6) == 3 && pp == 0) { insn.rawName = "movhlps"; vecEG(16, false); return true; }
-            insn.rawName = pp == 1 ? "movlpd" : "movlps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true;
+            if (pp >= 2 || (r.peek() >> 6) == 3) return false;
+            insn.rawName = pp == 1 ? "movlpd" : "movlps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); addOp(insn, xmm(reg)); addOp(insn, rm); return true;
         }
-        case 0x13: { if (pp >= 2) return false; insn.rawName = pp == 1 ? "movlpd" : "movlps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0x13: { if (pp >= 2 || (r.peek() >> 6) == 3) return false; insn.rawName = pp == 1 ? "movlpd" : "movlps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
         case 0x16: {
             if (pp == 2) { insn.rawName = "movshdup"; vecEG(16, false); return true; }
             if ((r.peek() >> 6) == 3 && pp == 0) { insn.rawName = "movlhps"; vecEG(16, false); return true; }
-            insn.rawName = pp == 1 ? "movhpd" : "movhps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true;
+            if (pp >= 2 || (r.peek() >> 6) == 3) return false;
+            insn.rawName = pp == 1 ? "movhpd" : "movhps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); addOp(insn, xmm(reg)); addOp(insn, rm); return true;
         }
-        case 0x17: { if (pp >= 2) return false; insn.rawName = pp == 1 ? "movhpd" : "movhps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
-        case 0x2B: { if (pp >= 2) return false; insn.rawName = pp == 1 ? "movntpd" : "movntps"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
-        case 0xE7: { if (pp != 1) return false; insn.rawName = "movntdq"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
-        case 0xF0: { if (pp != 3) return false; insn.rawName = "lddqu"; vecEG(16, false); return true; }
+        case 0x17: { if (pp >= 2 || (r.peek() >> 6) == 3) return false; insn.rawName = pp == 1 ? "movhpd" : "movhps"; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0x2B: { if (pp >= 2 || (r.peek() >> 6) == 3) return false; insn.rawName = pp == 1 ? "movntpd" : "movntps"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0xE7: { if (pp != 1 || (r.peek() >> 6) == 3) return false; insn.rawName = "movntdq"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0xD6: { if (pp != 1) return false; insn.mnemonic = M::Movq; Operand rm; int reg = decodeModRM(r, p, 8, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, rm); addOp(insn, xmm(reg)); return true; }
+        case 0xE6: { if (pp == 0) return false; insn.rawName = pp == 1 ? "cvttpd2dq" : pp == 2 ? "cvtdq2pd" : "cvtpd2dq"; vecEG(pp == 2 ? 8 : 16, false); return true; }
+        case 0xF7: { if (pp != 1 || (r.peek() >> 6) != 3) return false; insn.rawName = "maskmovdqu"; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
+        case 0xF0: { if (pp != 3 || (r.peek() >> 6) == 3) return false; insn.rawName = "lddqu"; vecEG(16, false); return true; }
         case 0x28: case 0x29: { if (pp >= 2) return false; insn.mnemonic = pp == 1 ? M::Movapd : M::Movaps; vecEG(16, op == 0x29); return true; }
         case 0x6F: case 0x7F: { if (pp != 1 && pp != 2) return false; insn.mnemonic = pp == 1 ? M::Movdqa : M::Movdqu; vecEG(16, op == 0x7F); return true; }
         case 0x54: if (pp >= 2) return false; insn.mnemonic = M(int(M::Andps) + pp); vecEG(16, false); return true;
@@ -656,10 +772,15 @@ bool decodeX87(Reader& r, Instruction& insn, uint8_t op) {
     r.u8();
     switch (op) {
         case 0xD8: { static const char* n[8] = {"fadd","fmul","fcom","fcomp","fsub","fsubr","fdiv","fdivr"}; insn.rawName = n[reg]; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
-        case 0xDC: { static const char* n[8] = {"fadd","fmul",nullptr,nullptr,"fsubr","fsub","fdivr","fdiv"}; if (!n[reg]) return false; insn.rawName = n[reg]; addOp(insn, st(rm)); addOp(insn, st(0)); return true; }
+        case 0xDC: {
+            if (reg == 2 || reg == 3) { insn.rawName = reg == 2 ? "fcom" : "fcomp"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }   // undocumented alias
+            static const char* n[8] = {"fadd","fmul",nullptr,nullptr,"fsubr","fsub","fdivr","fdiv"};
+            insn.rawName = n[reg]; addOp(insn, st(rm)); addOp(insn, st(0)); return true;
+        }
         case 0xD9:
             if (m < 0xC8) { insn.rawName = "fld"; addOp(insn, st(rm)); return true; }
             if (m < 0xD0) { insn.rawName = "fxch"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xD8 && m < 0xE0) { insn.rawName = "fstpnce"; addOp(insn, st(rm)); return true; }   // undocumented alias
             switch (m) {
                 case 0xD0: insn.rawName = "fnop"; return true;
                 case 0xE0: insn.rawName = "fchs"; return true;
@@ -704,19 +825,24 @@ bool decodeX87(Reader& r, Instruction& insn, uint8_t op) {
             if (m < 0xD0) { insn.rawName = "fcmovne"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
             if (m < 0xD8) { insn.rawName = "fcmovnbe"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
             if (m < 0xE0) { insn.rawName = "fcmovnu"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
+            if (m == 0xE0) { insn.rawName = "fneni"; return true; }     // deprecated no-op
+            if (m == 0xE1) { insn.rawName = "fndisi"; return true; }
             if (m == 0xE2) { insn.rawName = "fnclex"; return true; }
             if (m == 0xE3) { insn.rawName = "fninit"; return true; }
+            if (m == 0xE4) { insn.rawName = "fnsetpm"; return true; }
             if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fucomi"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
             if (m >= 0xF0 && m < 0xF8) { insn.rawName = "fcomi"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
             return false;
         case 0xDD:
             if (m < 0xC8) { insn.rawName = "ffree"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xC8 && m < 0xD0) { insn.rawName = "fxch"; addOp(insn, st(rm)); return true; }   // undocumented alias
             if (m >= 0xD0 && m < 0xD8) { insn.rawName = "fst"; addOp(insn, st(rm)); return true; }
             if (m >= 0xD8 && m < 0xE0) { insn.rawName = "fstp"; addOp(insn, st(rm)); return true; }
             if (m >= 0xE0 && m < 0xE8) { insn.rawName = "fucom"; addOp(insn, st(rm)); return true; }
             if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fucomp"; addOp(insn, st(rm)); return true; }
             return false;
         case 0xDE:
+            if (m >= 0xD0 && m < 0xD8) { insn.rawName = "fcomp"; addOp(insn, st(rm)); return true; }   // undocumented alias
             if (m < 0xC8) { insn.rawName = "faddp"; }
             else if (m < 0xD0) { insn.rawName = "fmulp"; }
             else if (m == 0xD9) { insn.rawName = "fcompp"; return true; }
@@ -727,6 +853,9 @@ bool decodeX87(Reader& r, Instruction& insn, uint8_t op) {
             else return false;
             addOp(insn, st(rm)); addOp(insn, st(0)); return true;
         case 0xDF:
+            if (m < 0xC8) { insn.rawName = "ffreep"; addOp(insn, st(rm)); return true; }   // undocumented alias
+            if (m >= 0xC8 && m < 0xD0) { insn.rawName = "fxch"; addOp(insn, st(rm)); return true; }
+            if (m >= 0xD0 && m < 0xE0) { insn.rawName = "fstp"; addOp(insn, st(rm)); return true; }   // D0-D7 + D8-DF undocumented alias
             if (m == 0xE0) { insn.rawName = "fnstsw"; addOp(insn, regOp(makeGpr(0, 2, p.rex))); return true; }
             if (m >= 0xE8 && m < 0xF0) { insn.rawName = "fucomip"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
             if (m >= 0xF0 && m < 0xF8) { insn.rawName = "fcomip"; addOp(insn, st(0)); addOp(insn, st(rm)); return true; }
@@ -784,7 +913,10 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
         case 0x99: insn.mnemonic = p.rexW ? M::Cqo : M::Cdq; return true;
         case 0xA0: case 0xA1: case 0xA2: case 0xA3: {
             int s = (op == 0xA0 || op == 0xA2) ? 1 : SZv(p);
-            Operand mo; mo.kind = OperandKind::Mem; mo.sizeBytes = uint8_t(s); mo.mem.dispOffset = uint8_t(r.pos); mo.mem.disp = int64_t(r.u64());
+            int as = p.addrsize ? 4 : 8;   // moffs width follows the address size, not the operand size
+            Operand mo; mo.kind = OperandKind::Mem; mo.sizeBytes = uint8_t(s);
+            mo.mem.dispOffset = uint8_t(r.pos); mo.mem.dispSize = uint8_t(as);
+            mo.mem.disp = as == 4 ? int64_t(uint32_t(r.imm(4))) : int64_t(r.u64());
             Operand reg = regOp(makeGpr(0, s, p.rex));
             insn.mnemonic = M::Mov;
             if (op == 0xA0 || op == 0xA1) { addOp(insn, reg); addOp(insn, mo); }
@@ -801,8 +933,16 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
         case 0xC1: { int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); insn.mnemonic = kGrp2[reg & 7]; addOp(insn, e); addOp(insn, immOp(r, 1)); return true; }
         case 0xC2: insn.mnemonic = M::Ret; addOp(insn, immOp(r, 2)); return true;
         case 0xC3: insn.mnemonic = M::Ret; return true;
-        case 0xC6: { Operand e; int reg = decodeModRM(r, p, 1, e); insn.mnemonic = (reg == 0) ? M::Mov : M::Invalid; addOp(insn, e); addOp(insn, immOp(r, 1)); return true; }
-        case 0xC7: { int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); insn.mnemonic = (reg == 0) ? M::Mov : M::Invalid; addOp(insn, e); addOp(insn, immOp(r, SZz(p))); return true; }
+        case 0xC6: {
+            uint8_t mb = r.peek();
+            if (((mb >> 3) & 7) == 7) { if (mb == 0xF8) { r.u8(); insn.rawName = "xabort"; addOp(insn, immOp(r, 1)); return true; } return false; }
+            Operand e; int reg = decodeModRM(r, p, 1, e); if ((reg & 7) != 0) return false; insn.mnemonic = M::Mov; addOp(insn, e); addOp(insn, immOp(r, 1)); return true;
+        }
+        case 0xC7: {
+            uint8_t mb = r.peek();
+            if (((mb >> 3) & 7) == 7) { if (mb == 0xF8) { r.u8(); insn.rawName = "xbegin"; addOp(insn, relOp(r, SZz(p))); return true; } return false; }
+            int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); if ((reg & 7) != 0) return false; insn.mnemonic = M::Mov; addOp(insn, e); addOp(insn, immOp(r, SZz(p))); return true;
+        }
         case 0xC9: insn.mnemonic = M::Leave; return true;
         case 0xCC: insn.mnemonic = M::Int3; return true;
         case 0xCD: insn.mnemonic = M::Int; addOp(insn, immOp(r, 1)); return true;
@@ -810,8 +950,8 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
         case 0xD1: { int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); insn.mnemonic = kGrp2[reg & 7]; addOp(insn, e); addOp(insn, oneOp()); return true; }
         case 0xD2: { Operand e; int reg = decodeModRM(r, p, 1, e); insn.mnemonic = kGrp2[reg & 7]; addOp(insn, e); addOp(insn, clOp(p)); return true; }
         case 0xD3: { int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); insn.mnemonic = kGrp2[reg & 7]; addOp(insn, e); addOp(insn, clOp(p)); return true; }
-        case 0xE8: insn.mnemonic = M::Call; addOp(insn, relOp(r, SZz(p))); return true;
-        case 0xE9: insn.mnemonic = M::Jmp; addOp(insn, relOp(r, SZz(p))); return true;
+        case 0xE8: insn.mnemonic = M::Call; addOp(insn, relOp(r, 4)); return true;   // near branch: rel32, 0x66 ignored in 64-bit
+        case 0xE9: insn.mnemonic = M::Jmp; addOp(insn, relOp(r, 4)); return true;
         case 0xEB: insn.mnemonic = M::Jmp; addOp(insn, relOp(r, 1)); return true;
         case 0xF4: insn.mnemonic = M::Hlt; return true;
         case 0xF6: { Operand e; int reg = decodeModRM(r, p, 1, e); insn.mnemonic = kGrp3[reg & 7]; addOp(insn, e); if ((reg & 7) < 2) addOp(insn, immOp(r, 1)); return true; }
@@ -825,7 +965,9 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
                 case 0: insn.mnemonic = M::Inc; break;
                 case 1: insn.mnemonic = M::Dec; break;
                 case 2: insn.mnemonic = M::Call; break;
+                case 3: if (e.kind != OperandKind::Mem) return false; insn.rawName = "callf"; break;
                 case 4: insn.mnemonic = M::Jmp; break;
+                case 5: if (e.kind != OperandKind::Mem) return false; insn.rawName = "jmpf"; break;
                 case 6: insn.mnemonic = M::Push; break;
                 default: insn.mnemonic = M::Invalid; break;
             }
@@ -850,6 +992,33 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
         case 0xFB: insn.mnemonic = M::Sti; return true;
         case 0xFC: insn.mnemonic = M::Cld; return true;
         case 0xFD: insn.mnemonic = M::Std; return true;
+        case 0x6C: insn.rawName = "insb"; return true;
+        case 0x6D: insn.rawName = p.opsize ? "insw" : "insd"; return true;
+        case 0x6E: insn.rawName = "outsb"; return true;
+        case 0x6F: insn.rawName = p.opsize ? "outsw" : "outsd"; return true;
+        case 0xE4: insn.rawName = "in"; addOp(insn, regOp(makeGpr(0, 1, p.rex))); addOp(insn, immOp(r, 1)); return true;
+        case 0xE5: insn.rawName = "in"; addOp(insn, regOp(makeGpr(0, p.opsize ? 2 : 4, p.rex))); addOp(insn, immOp(r, 1)); return true;
+        case 0xE6: insn.rawName = "out"; addOp(insn, immOp(r, 1)); addOp(insn, regOp(makeGpr(0, 1, p.rex))); return true;
+        case 0xE7: insn.rawName = "out"; addOp(insn, immOp(r, 1)); addOp(insn, regOp(makeGpr(0, p.opsize ? 2 : 4, p.rex))); return true;
+        case 0xEC: insn.rawName = "in"; addOp(insn, regOp(makeGpr(0, 1, p.rex))); addOp(insn, regOp(makeGpr(2, 2, p.rex))); return true;
+        case 0xED: insn.rawName = "in"; addOp(insn, regOp(makeGpr(0, p.opsize ? 2 : 4, p.rex))); addOp(insn, regOp(makeGpr(2, 2, p.rex))); return true;
+        case 0xEE: insn.rawName = "out"; addOp(insn, regOp(makeGpr(2, 2, p.rex))); addOp(insn, regOp(makeGpr(0, 1, p.rex))); return true;
+        case 0xEF: insn.rawName = "out"; addOp(insn, regOp(makeGpr(2, 2, p.rex))); addOp(insn, regOp(makeGpr(0, p.opsize ? 2 : 4, p.rex))); return true;
+        case 0xE0: insn.rawName = "loopne"; addOp(insn, relOp(r, 1)); return true;
+        case 0xE1: insn.rawName = "loope"; addOp(insn, relOp(r, 1)); return true;
+        case 0xE2: insn.rawName = "loop"; addOp(insn, relOp(r, 1)); return true;
+        case 0xE3: insn.rawName = p.addrsize ? "jecxz" : "jrcxz"; addOp(insn, relOp(r, 1)); return true;
+        case 0xC8: insn.rawName = "enter"; addOp(insn, immOp(r, 2)); addOp(insn, immOp(r, 1)); return true;
+        case 0xCA: insn.rawName = "retf"; addOp(insn, immOp(r, 2)); return true;
+        case 0xCB: insn.rawName = "retf"; return true;
+        case 0xCF: insn.rawName = p.rexW ? "iretq" : (p.opsize ? "iret" : "iretd"); return true;
+        case 0xD7: insn.rawName = "xlat"; return true;
+        case 0x9B: insn.rawName = "fwait"; return true;
+        case 0x9E: insn.rawName = "sahf"; return true;
+        case 0x9F: insn.rawName = "lahf"; return true;
+        case 0xF1: insn.rawName = "int1"; return true;
+        case 0x8C: { Operand e; int reg = decodeModRM(r, p, 2, e); if ((reg & 7) > 5) return false; Operand s; s.kind = OperandKind::Reg; s.reg.cls = RegClass::Sreg; s.reg.idx = uint8_t(reg & 7); s.sizeBytes = 2; insn.mnemonic = M::Mov; addOp(insn, e); addOp(insn, s); return true; }
+        case 0x8E: { Operand e; int reg = decodeModRM(r, p, 2, e); if ((reg & 7) > 5 || (reg & 7) == 1) return false; Operand s; s.kind = OperandKind::Reg; s.reg.cls = RegClass::Sreg; s.reg.idx = uint8_t(reg & 7); s.sizeBytes = 2; insn.mnemonic = M::Mov; addOp(insn, s); addOp(insn, e); return true; }
         default: return false;
     }
     return false;
@@ -913,9 +1082,9 @@ bool decodeVex(Reader& r, Instruction& insn) {
         Operand rm; rmVec(vsz, rm); insn.rawName = nm; addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); addOp(insn, immOp(r, 1)); return true;
     }
     switch (op) {
-        case 0x10: case 0x11: { M m = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd; two(m, sc, op == 0x11); return true; }
-        case 0x28: case 0x29: if (pp >= 2) return false; two(pp == 1 ? M::Movapd : M::Movaps, vsz, op == 0x29); return true;
-        case 0x6F: case 0x7F: if (pp != 1 && pp != 2) return false; two(pp == 1 ? M::Movdqa : M::Movdqu, vsz, op == 0x7F); return true;
+        case 0x10: case 0x11: { if (pp < 2 && p.vexVVVV) return false; M m = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd; two(m, sc, op == 0x11); return true; }
+        case 0x28: case 0x29: if (pp >= 2 || p.vexVVVV) return false; two(pp == 1 ? M::Movapd : M::Movaps, vsz, op == 0x29); return true;
+        case 0x6F: case 0x7F: if ((pp != 1 && pp != 2) || p.vexVVVV) return false; two(pp == 1 ? M::Movdqa : M::Movdqu, vsz, op == 0x7F); return true;
         case 0x54: if (pp >= 2) return false; three(M(int(M::Andps) + pp), vsz); return true;
         case 0x55: if (pp >= 2) return false; three(M(int(M::Andnps) + pp), vsz); return true;
         case 0x56: if (pp >= 2) return false; three(M(int(M::Orps) + pp), vsz); return true;
@@ -928,27 +1097,31 @@ bool decodeVex(Reader& r, Instruction& insn) {
         case 0x59: three(M(int(M::Mulps) + pp), sc); return true;
         case 0x5C: three(M(int(M::Subps) + pp), sc); return true;
         case 0x5E: three(M(int(M::Divps) + pp), sc); return true;
-        case 0x2E: if (pp >= 2) return false; two(M(int(M::Ucomiss) + pp), pp == 1 ? 8 : 4, false); return true;
-        case 0x2F: if (pp >= 2) return false; two(M(int(M::Comiss) + pp), pp == 1 ? 8 : 4, false); return true;
-        case 0x6E: { if (pp != 1) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, vreg(reg)); addOp(insn, rm); return true; }
+        case 0x2E: if (pp >= 2 || p.vexVVVV) return false; two(M(int(M::Ucomiss) + pp), pp == 1 ? 8 : 4, false); return true;
+        case 0x2F: if (pp >= 2 || p.vexVVVV) return false; two(M(int(M::Comiss) + pp), pp == 1 ? 8 : 4, false); return true;
+        case 0x6E: { if (pp != 1 || p.vexVVVV) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, vreg(reg)); addOp(insn, rm); return true; }
         case 0x7E: {
+            if (p.vexVVVV) return false;
             if (pp == 2) { two(M::Movq, 8, false); return true; }
             if (pp == 1) { int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, rm); addOp(insn, vreg(reg)); return true; }
             return false;
         }
         case 0x14: if (pp >= 2) return false; three(pp == 1 ? M::Unpcklpd : M::Unpcklps, vsz); return true;
         case 0x15: if (pp >= 2) return false; three(pp == 1 ? M::Unpckhpd : M::Unpckhps, vsz); return true;
-        case 0x50: if (pp >= 2) return false; gprDst(pp == 1 ? M::Movmskpd : M::Movmskps, vsz, 4); return true;
-        case 0xD7: if (pp != 1) return false; gprDst(M::Pmovmskb, vsz, 4); return true;
-        case 0x70: if (pp == 0) return false; twoImm(pp == 1 ? M::Pshufd : pp == 2 ? M::Pshufhw : M::Pshuflw, vsz); return true;
+        case 0x50: if (pp >= 2 || p.vexVVVV) return false; gprDst(pp == 1 ? M::Movmskpd : M::Movmskps, vsz, 4); return true;
+        case 0xD7: if (pp != 1 || p.vexVVVV) return false; gprDst(M::Pmovmskb, vsz, 4); return true;
+        case 0x70: if (pp == 0 || p.vexVVVV) return false; twoImm(pp == 1 ? M::Pshufd : pp == 2 ? M::Pshufhw : M::Pshuflw, vsz); return true;
         case 0xC6: if (pp >= 2) return false; threeImm(pp == 1 ? M::Shufpd : M::Shufps, vsz); return true;
+        case 0x51: if (pp >= 2) { threeRaw(pp == 2 ? "vsqrtss" : "vsqrtsd"); } else { if (p.vexVVVV) return false; twoRaw(pp == 1 ? "vsqrtpd" : "vsqrtps"); } return true;
+        case 0x52: if (pp == 1 || pp == 3) return false; if (pp == 2) { threeRaw("vrsqrtss"); } else { if (p.vexVVVV) return false; twoRaw("vrsqrtps"); } return true;
+        case 0x53: if (pp == 1 || pp == 3) return false; if (pp == 2) { threeRaw("vrcpss"); } else { if (p.vexVVVV) return false; twoRaw("vrcpps"); } return true;
         case 0x5D: three(M(int(M::Minps) + pp), sc); return true;
         case 0x5F: three(M(int(M::Maxps) + pp), sc); return true;
         case 0xC2: threeImm(M(int(M::Cmpps) + pp), sc); return true;
-        case 0x5B: if (pp == 3) return false; two(pp == 0 ? M::Cvtdq2ps : pp == 1 ? M::Cvtps2dq : M::Cvttps2dq, vsz, false); return true;
-        case 0x5A: if (pp >= 2) three(pp == 2 ? M::Cvtss2sd : M::Cvtsd2ss, sc); else two(pp == 1 ? M::Cvtpd2ps : M::Cvtps2pd, vsz, false); return true;
+        case 0x5B: if (pp == 3 || p.vexVVVV) return false; two(pp == 0 ? M::Cvtdq2ps : pp == 1 ? M::Cvtps2dq : M::Cvttps2dq, vsz, false); return true;
+        case 0x5A: if (pp >= 2) three(pp == 2 ? M::Cvtss2sd : M::Cvtsd2ss, sc); else { if (p.vexVVVV) return false; two(pp == 1 ? M::Cvtpd2ps : M::Cvtps2pd, vsz, false); } return true;
         case 0x2A: { if (pp != 2 && pp != 3) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = pp == 2 ? M::Cvtsi2ss : M::Cvtsi2sd; addOp(insn, vreg(reg)); addOp(insn, vreg(p.vexVVVV)); addOp(insn, rm); return true; }
-        case 0x2C: case 0x2D: { if (pp != 2 && pp != 3) return false; int ms = pp == 2 ? 4 : 8; int gs = p.rexW ? 8 : 4; bool tr = op == 0x2C; gprDst(tr ? (pp == 2 ? M::Cvttss2si : M::Cvttsd2si) : (pp == 2 ? M::Cvtss2si : M::Cvtsd2si), ms, gs); return true; }
+        case 0x2C: case 0x2D: { if ((pp != 2 && pp != 3) || p.vexVVVV) return false; int ms = pp == 2 ? 4 : 8; int gs = p.rexW ? 8 : 4; bool tr = op == 0x2C; gprDst(tr ? (pp == 2 ? M::Cvttss2si : M::Cvttsd2si) : (pp == 2 ? M::Cvtss2si : M::Cvtsd2si), ms, gs); return true; }
         case 0xFC: if (pp != 1) return false; three(M::Paddb, vsz); return true;
         case 0xFD: if (pp != 1) return false; three(M::Paddw, vsz); return true;
         case 0xFE: if (pp != 1) return false; three(M::Paddd, vsz); return true;
@@ -963,6 +1136,9 @@ bool decodeVex(Reader& r, Instruction& insn) {
         case 0x64: if (pp != 1) return false; three(M::Pcmpgtb, vsz); return true;
         case 0x65: if (pp != 1) return false; three(M::Pcmpgtw, vsz); return true;
         case 0x66: if (pp != 1) return false; three(M::Pcmpgtd, vsz); return true;
+        case 0x7C: if (pp != 1 && pp != 3) return false; threeRaw(pp == 1 ? "vhaddpd" : "vhaddps"); return true;
+        case 0x7D: if (pp != 1 && pp != 3) return false; threeRaw(pp == 1 ? "vhsubpd" : "vhsubps"); return true;
+        case 0xD0: if (pp != 1 && pp != 3) return false; threeRaw(pp == 1 ? "vaddsubpd" : "vaddsubps"); return true;
         default: return false;
     }
 }
@@ -1004,6 +1180,19 @@ void setFlags(Instruction& in) {
     }
 }
 
+bool lockLegal(const Instruction& in) {   // LOCK needs a memory destination and a lockable op
+    if (in.operandCount == 0 || in.operands[0].kind != OperandKind::Mem) return false;
+    switch (in.mnemonic) {
+        case M::Add: case M::Adc: case M::And: case M::Or: case M::Sbb: case M::Sub: case M::Xor:
+        case M::Inc: case M::Dec: case M::Neg: case M::Not: case M::Xadd: case M::Xchg:
+        case M::Cmpxchg: case M::Bts: case M::Btr: case M::Btc:
+            return true;
+        default: break;
+    }
+    if (in.rawName && (!std::strcmp(in.rawName, "cmpxchg16b") || !std::strcmp(in.rawName, "cmpxchg8b"))) return true;
+    return false;
+}
+
 void finalize(Reader& r, Instruction& insn) {
     insn.length = uint8_t(r.pos > 255 ? 255 : r.pos);
     for (int i = 0; i < insn.operandCount; ++i) {
@@ -1032,6 +1221,7 @@ DecodeResult decode(const uint8_t* p, size_t n, uint64_t address) {
 
     if (r.overflow) { res.status = DecodeStatus::Truncated; return res; }
     if (!handled || (insn.mnemonic == M::Invalid && insn.rawName == nullptr)) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
+    if (insn.prefixes.lock && !lockLegal(insn)) { insn.length = uint8_t(r.pos); res.status = DecodeStatus::Invalid; return res; }
 
     finalize(r, insn);
     res.status = DecodeStatus::Ok;
@@ -1068,6 +1258,9 @@ std::string regName(const Reg& r) {
         case RegClass::Ymm:   return "ymm" + std::to_string(r.idx);
         case RegClass::Rip:   return "rip";
         case RegClass::St:    return "st(" + std::to_string(r.idx) + ")";
+        case RegClass::Sreg:  return r.idx < 6 ? kSeg[r.idx] : "?";
+        case RegClass::Cr:    return "cr" + std::to_string(r.idx);
+        case RegClass::Dr:    return "dr" + std::to_string(r.idx);
         default: return "?";
     }
 }

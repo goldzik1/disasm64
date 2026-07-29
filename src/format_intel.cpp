@@ -29,6 +29,9 @@ std::string regName(const Reg& r) {
         case RegClass::Ymm:   return "ymm" + std::to_string(r.idx);
         case RegClass::Rip:   return "rip";
         case RegClass::St:    return "st(" + std::to_string(r.idx) + ")";
+        case RegClass::Sreg:  return r.idx < 6 ? kSeg[r.idx] : "?";
+        case RegClass::Cr:    return "cr" + std::to_string(r.idx);
+        case RegClass::Dr:    return "dr" + std::to_string(r.idx);
         default: return "?";
     }
 }
