@@ -29,6 +29,13 @@ target_include_directories(disasm64_c PUBLIC include)
 add_executable(bench tools/bench.cpp)
 target_link_libraries(bench PRIVATE disasm64)
 
+# Native Win32 GUI front-end (dark theme, live disassembly)
+if(WIN32)
+    add_executable(disasm64_gui WIN32 gui/disasm64_gui.cpp)
+    target_link_libraries(disasm64_gui PRIVATE disasm64)
+    target_compile_definitions(disasm64_gui PRIVATE UNICODE _UNICODE)
+endif()
+
 add_executable(robust fuzz/robust.cpp)
 target_link_libraries(robust PRIVATE disasm64)
 
