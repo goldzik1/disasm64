@@ -14,10 +14,17 @@ sides in hand buys features a plain disassembler can't give you — the first of
 
 The general-purpose integer ISA: the legacy one/two-byte maps and REX — the arithmetic
 group, mov/lea/push/pop, the shift and group-1/2/3/4/5 encodings, test, imul,
-movzx/movsx/movsxd, the jcc/setcc/cmovcc families, call/jmp/ret, and the full ModRM /
-SIB / displacement / RIP-relative addressing that goes with them. Instruction length is
-byte-exact, and the decoder is fuzzed to never crash, hang, or return a nonsense length
-on arbitrary input (3M random decodes, zero anomalies).
+movzx/movsx/movsxd, the jcc/setcc/cmovcc families, call/jmp/ret, string ops, bit ops
+(bt/bts/btr/btc), bswap/xadd/cmpxchg, and the full ModRM / SIB / displacement /
+RIP-relative addressing that goes with them — plus `endbr64` and friends.
+
+A curated slice of SSE is in too: the move and logic family
+(movups/movaps/movdqa/movdqu, movss/movsd, movd/movq, pxor, xorps), scalar and packed
+arithmetic (add/mul/sub/div/sqrt in ps/pd/ss/sd), and ucomiss/comisd — with xmm
+operands and the right scalar-vs-packed memory sizes.
+
+Instruction length is byte-exact, and the decoder is fuzzed to never crash, hang, or
+return a nonsense length on arbitrary input (millions of random decodes, zero anomalies).
 
 ```
 $ disasm64 --base 0x401000 55 48 89 e5 48 83 ec 20 e8 00 00 00 00 0f b6 c1 c3
@@ -66,12 +73,13 @@ just a printer.
 
 ## Roadmap
 
-Being built in stages; the general-purpose core above is the foundation.
+Being built in stages; the general-purpose core plus the SSE slice above is the
+foundation.
 
-- **SSE / AVX (VEX).** The VEX prefix is already parsed; the vector opcode tables and
-  operand forms come next (emitted from a permissive open ISA dataset, committed so the
-  build stays dependency-free — the engine, operand model, and formatter are all
-  hand-written).
+- **Full SSE + AVX (VEX).** The VEX prefix is already parsed; the remaining SSE forms
+  and the AVX vector tables come next (emitted from a permissive open ISA dataset,
+  committed so the build stays dependency-free — the engine, operand model, and
+  formatter are all hand-written).
 - **Semantic metadata.** Per-instruction flags read/written, implicit operands,
   per-operand read/write access, and ISA-set / category.
 - **RE layer.** A full hook/trampoline helper on top of `relocate`, an anti-disassembly
