@@ -50,6 +50,18 @@ void addOp(Instruction& insn, const Operand& o) {
     if (insn.operandCount < 4) insn.operands[insn.operandCount++] = o;
 }
 
+struct SseEnt { uint8_t o; const char* n; };
+const char* findSse(const SseEnt* t, size_t n, uint8_t op) { for (size_t i = 0; i < n; ++i) if (t[i].o == op) return t[i].n; return nullptr; }
+static const SseEnt kPackedInt[] = {
+    {0x60,"punpcklbw"},{0x61,"punpcklwd"},{0x62,"punpckldq"},{0x63,"packsswb"},{0x67,"packuswb"},
+    {0x68,"punpckhbw"},{0x69,"punpckhwd"},{0x6A,"punpckhdq"},{0x6B,"packssdw"},{0x6C,"punpcklqdq"},{0x6D,"punpckhqdq"},
+    {0xD1,"psrlw"},{0xD2,"psrld"},{0xD3,"psrlq"},{0xD5,"pmullw"},{0xD8,"psubusb"},{0xD9,"psubusw"},{0xDA,"pminub"},
+    {0xDC,"paddusb"},{0xDD,"paddusw"},{0xDE,"pmaxub"},{0xE0,"pavgb"},{0xE1,"psraw"},{0xE2,"psrad"},{0xE3,"pavgw"},
+    {0xE4,"pmulhuw"},{0xE5,"pmulhw"},{0xE8,"psubsb"},{0xE9,"psubsw"},{0xEA,"pminsw"},{0xEC,"paddsb"},{0xED,"paddsw"},
+    {0xEE,"pmaxsw"},{0xF1,"psllw"},{0xF2,"pslld"},{0xF3,"psllq"},{0xF4,"pmuludq"},{0xF5,"pmaddwd"},{0xF6,"psadbw"},
+};
+const size_t kPackedIntN = sizeof(kPackedInt) / sizeof(kPackedInt[0]);
+
 bool decode0F38(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
     uint8_t op = r.u8();
@@ -136,6 +148,7 @@ bool decode0F(Reader& r, Instruction& insn) {
         else { addOp(insn, xmm(reg)); addOp(insn, rm); }
     };
     auto sseArith = [&](M base) { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16; insn.mnemonic = M(int(base) + pp); vecEG(msz, false); };
+    if (pp == 1) { const char* nm = findSse(kPackedInt, kPackedIntN, op); if (nm) { Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.rawName = nm; addOp(insn, xmm(reg)); addOp(insn, rm); return true; } }
     switch (op) {
         case 0x58: sseArith(M::Addps); return true;
         case 0x59: sseArith(M::Mulps); return true;
@@ -367,7 +380,7 @@ bool decodeVex(Reader& r, Instruction& insn) {
         return false;
     }
 
-
+    if (pp == 1) { const char* nm = findSse(kPackedInt, kPackedIntN, op); if (nm) { threeRaw(nm); return true; } }
     switch (op) {
         case 0x10: case 0x11: { M m = pp == 0 ? M::Movups : pp == 1 ? M::Movupd : pp == 2 ? M::Movss : M::Movsd; two(m, sc, op == 0x11); return true; }
         case 0x28: case 0x29: if (pp >= 2) return false; two(pp == 1 ? M::Movapd : M::Movaps, vsz, op == 0x29); return true;
