@@ -110,7 +110,7 @@ bool emit(Out& out, const Instruction& in, int width, const uint8_t* opc, int op
     if (in.prefixes.addrsize) out.put(0x67);
     if (width == 2) out.put(0x66);
     bool w = width == 8;
-    uint8_t rex = 0x40 | (w << 3) | (e.r << 2) | (e.x << 1) | e.b;
+    uint8_t rex = uint8_t(0x40 | (w << 3) | (e.r << 2) | (e.x << 1) | (e.b ? 1 : 0));
     bool need = w || e.r || e.x || e.b || e.forceRex;
     if (need && e.badRex) return false;
     if (need) out.put(rex);
@@ -221,7 +221,7 @@ EncodeResult encode(const Instruction& in, uint8_t* dst, size_t cap) {
                     bool isDr = ctl.reg.cls == RegClass::Dr;
                     uint8_t op2 = uint8_t((aCtl ? 0x22 : 0x20) + (isDr ? 1 : 0));
                     if (in.prefixes.lock) out.put(0xF0);
-                    uint8_t rex = 0x40 | ((ctl.reg.idx >= 8) << 2) | (gpr.reg.idx >= 8);
+                    uint8_t rex = uint8_t(0x40 | ((ctl.reg.idx >= 8) << 2) | (gpr.reg.idx >= 8 ? 1 : 0));
                     if (rex != 0x40) out.put(rex);
                     out.put(0x0F); out.put(op2);
                     out.put(uint8_t(0xC0 | ((ctl.reg.idx & 7) << 3) | (gpr.reg.idx & 7)));
@@ -258,7 +258,7 @@ EncodeResult encode(const Instruction& in, uint8_t* dst, size_t cap) {
                     bool w = width == 8; bool need = w || e.b || e.forceRex;
                     if (need && e.badRex) return {EncodeStatus::Unsupported, 0};
                     if (in.prefixes.lock) out.put(0xF0);
-                    if (need) out.put(uint8_t(0x40 | (w << 3) | e.b));
+                    if (need) out.put(uint8_t(0x40 | (w << 3) | (e.b ? 1 : 0)));
                     out.put(op); out.imm(b.imm, width);
                     return done(out);
                 }

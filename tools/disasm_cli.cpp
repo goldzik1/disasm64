@@ -1,6 +1,7 @@
 // disasm64 [--base 0xADDR] <hex bytes...>
 #include "disasm64/disasm64.h"
 #include "disasm64/analysis.h"
+#include "disasm64/loader.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,25 +18,13 @@ static const char* accName(OperandAccess a) {
                  case OperandAccess::ReadWrite: return "rw"; default: return "-"; }
 }
 
-int main(int argc, char** argv) {
-    uint64_t base = 0x1000;
-    bool showFlags = false, att = false, showSem = false;
-    std::vector<uint8_t> code;
-    for (int i = 1; i < argc; ++i) {
-        if (!std::strcmp(argv[i], "--base") && i + 1 < argc) { base = std::strtoull(argv[++i], nullptr, 0); continue; }
-        if (!std::strcmp(argv[i], "--flags")) { showFlags = true; continue; }
-        if (!std::strcmp(argv[i], "--att")) { att = true; continue; }
-        if (!std::strcmp(argv[i], "--sem")) { showSem = true; continue; }
-        code.push_back(uint8_t(std::strtoul(argv[i], nullptr, 16)));
-    }
-    if (code.empty()) { std::printf("usage: disasm64 [--base 0xADDR] <hex bytes...>\n"); return 1; }
-
-    size_t pos = 0;
-    while (pos < code.size()) {
-        DecodeResult r = decode(code.data() + pos, code.size() - pos, base + pos);
+static void emit(const uint8_t* code, size_t n, uint64_t base, bool att, bool showFlags, bool showSem, size_t maxInsns) {
+    size_t pos = 0, count = 0;
+    while (pos < n && count < maxInsns) {
+        DecodeResult r = decode(code + pos, n - pos, base + pos);
         std::printf("%016llx  ", (unsigned long long)(base + pos));
         size_t len = (r.status == DecodeStatus::Ok) ? r.insn.length : 1;
-        for (size_t k = 0; k < len; ++k) std::printf("%02x ", code[pos + k]);
+        for (size_t k = 0; k < len && k < 10; ++k) std::printf("%02x ", code[pos + k]);
         for (size_t k = len; k < 8; ++k) std::printf("   ");
         if (r.status == DecodeStatus::Ok) {
             std::printf(" %s", (att ? formatAtt(r.insn) : formatIntel(r.insn)).c_str());
@@ -51,11 +40,48 @@ int main(int argc, char** argv) {
         else if (r.status == DecodeStatus::Truncated) { std::printf(" (truncated)\n"); break; }
         else std::printf(" (bad)\n");
         if (r.status == DecodeStatus::Ok)
-            for (const char* q : analyzeEncoding(code.data() + pos, code.size() - pos, base + pos))
+            for (const char* q : analyzeEncoding(code + pos, n - pos, base + pos))
                 std::printf("%18s  ! %s\n", "", q);
-        pos += len;
+        pos += len; ++count;
     }
-    for (const SweepIssue& s : antiDisasmScan(code.data(), code.size(), base))
+    for (const SweepIssue& s : antiDisasmScan(code, n, base))
         std::printf("%016llx  !! %s\n", (unsigned long long)s.address, s.what);
+}
+
+int main(int argc, char** argv) {
+    uint64_t base = 0x1000;
+    bool showFlags = false, att = false, showSem = false;
+    const char* filePath = nullptr;
+    std::vector<uint8_t> code;
+    for (int i = 1; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--base") && i + 1 < argc) { base = std::strtoull(argv[++i], nullptr, 0); continue; }
+        if (!std::strcmp(argv[i], "--file") && i + 1 < argc) { filePath = argv[++i]; continue; }
+        if (!std::strcmp(argv[i], "--flags")) { showFlags = true; continue; }
+        if (!std::strcmp(argv[i], "--att")) { att = true; continue; }
+        if (!std::strcmp(argv[i], "--sem")) { showSem = true; continue; }
+        code.push_back(uint8_t(std::strtoul(argv[i], nullptr, 16)));
+    }
+
+    if (filePath) {
+        FILE* f = std::fopen(filePath, "rb");
+        if (!f) { std::printf("cannot open %s\n", filePath); return 1; }
+        std::fseek(f, 0, SEEK_END); long sz = std::ftell(f); std::fseek(f, 0, SEEK_SET);
+        std::vector<uint8_t> data(sz > 0 ? size_t(sz) : 0);
+        if (!data.empty()) { size_t got = std::fread(data.data(), 1, data.size(), f); data.resize(got); }
+        std::fclose(f);
+        LoadedImage im = loadImage(std::move(data));
+        std::printf("; %s  %s  imagebase %llx  entry %llx\n", im.format.c_str(),
+                    im.machine.empty() ? "?" : im.machine.c_str(),
+                    (unsigned long long)im.imageBase, (unsigned long long)im.entry);
+        for (const CodeRegion& rg : im.code) {
+            std::printf("\n; section %s  va %llx  size %llx\n", rg.name.c_str(),
+                        (unsigned long long)rg.vaddr, (unsigned long long)rg.size);
+            emit(regionData(im, rg), rg.size, rg.vaddr, att, showFlags, showSem, 100000);
+        }
+        return 0;
+    }
+
+    if (code.empty()) { std::printf("usage: disasm64 [--base 0xADDR] [--file PATH] [--att] [--flags] [--sem] <hex bytes...>\n"); return 1; }
+    emit(code.data(), code.size(), base, att, showFlags, showSem, 1000000);
     return 0;
 }

@@ -201,6 +201,40 @@ struct EncodeResult {
 EncodeResult encode(const Instruction& insn, uint8_t* out, size_t cap);
 
 } // namespace disasm64
+#include <cstdint>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace disasm64 {
+
+// One executable region to disassemble, with the virtual address it lives at.
+struct CodeRegion {
+    size_t   fileOffset = 0;   // offset of the bytes within LoadedImage::file
+    size_t   size = 0;
+    uint64_t vaddr = 0;        // virtual address to decode at
+    std::string name;         // section name, or "raw"
+};
+
+struct LoadedImage {
+    std::vector<uint8_t> file;
+    std::vector<CodeRegion> code;   // executable sections (or the whole file for raw input)
+    uint64_t imageBase = 0;
+    uint64_t entry = 0;             // entry-point virtual address (0 if unknown)
+    bool isPE = false;
+    std::string format;             // "PE32+", "PE32", "raw"
+    std::string machine;            // "x86-64", "x86", or ""
+};
+
+// Parse a file image. Recognises PE (MZ/PE) and pulls out its executable sections at the
+// right virtual addresses; anything else is treated as a raw code blob at address 0.
+LoadedImage loadImage(std::vector<uint8_t> fileBytes);
+
+inline const uint8_t* regionData(const LoadedImage& im, const CodeRegion& r) {
+    return im.file.data() + r.fileOffset;
+}
+
+} // namespace disasm64
 #include <string>
 #include <vector>
 
@@ -1866,7 +1900,7 @@ bool emit(Out& out, const Instruction& in, int width, const uint8_t* opc, int op
     if (in.prefixes.addrsize) out.put(0x67);
     if (width == 2) out.put(0x66);
     bool w = width == 8;
-    uint8_t rex = 0x40 | (w << 3) | (e.r << 2) | (e.x << 1) | e.b;
+    uint8_t rex = uint8_t(0x40 | (w << 3) | (e.r << 2) | (e.x << 1) | (e.b ? 1 : 0));
     bool need = w || e.r || e.x || e.b || e.forceRex;
     if (need && e.badRex) return false;
     if (need) out.put(rex);
@@ -1977,7 +2011,7 @@ EncodeResult encode(const Instruction& in, uint8_t* dst, size_t cap) {
                     bool isDr = ctl.reg.cls == RegClass::Dr;
                     uint8_t op2 = uint8_t((aCtl ? 0x22 : 0x20) + (isDr ? 1 : 0));
                     if (in.prefixes.lock) out.put(0xF0);
-                    uint8_t rex = 0x40 | ((ctl.reg.idx >= 8) << 2) | (gpr.reg.idx >= 8);
+                    uint8_t rex = uint8_t(0x40 | ((ctl.reg.idx >= 8) << 2) | (gpr.reg.idx >= 8 ? 1 : 0));
                     if (rex != 0x40) out.put(rex);
                     out.put(0x0F); out.put(op2);
                     out.put(uint8_t(0xC0 | ((ctl.reg.idx & 7) << 3) | (gpr.reg.idx & 7)));
@@ -2014,7 +2048,7 @@ EncodeResult encode(const Instruction& in, uint8_t* dst, size_t cap) {
                     bool w = width == 8; bool need = w || e.b || e.forceRex;
                     if (need && e.badRex) return {EncodeStatus::Unsupported, 0};
                     if (in.prefixes.lock) out.put(0xF0);
-                    if (need) out.put(uint8_t(0x40 | (w << 3) | e.b));
+                    if (need) out.put(uint8_t(0x40 | (w << 3) | (e.b ? 1 : 0)));
                     out.put(op); out.imm(b.imm, width);
                     return done(out);
                 }
@@ -2234,6 +2268,81 @@ EncodeResult encode(const Instruction& in, uint8_t* dst, size_t cap) {
 
         default: return {EncodeStatus::Unsupported, 0};
     }
+}
+
+} // namespace disasm64
+#include <cstring>
+
+namespace disasm64 {
+namespace {
+
+// Bounds-checked little-endian reads over an untrusted file buffer.
+struct View {
+    const uint8_t* p;
+    size_t n;
+    bool ok = true;
+    uint16_t u16(size_t off) { if (off + 2 > n) { ok = false; return 0; } return uint16_t(p[off] | (p[off + 1] << 8)); }
+    uint32_t u32(size_t off) {
+        if (off + 4 > n) { ok = false; return 0; }
+        return uint32_t(p[off]) | (uint32_t(p[off + 1]) << 8) | (uint32_t(p[off + 2]) << 16) | (uint32_t(p[off + 3]) << 24);
+    }
+    uint64_t u64(size_t off) { if (off + 8 > n) { ok = false; return 0; } return uint64_t(u32(off)) | (uint64_t(u32(off + 4)) << 32); }
+};
+
+} // namespace
+
+LoadedImage loadImage(std::vector<uint8_t> fileBytes) {
+    LoadedImage im;
+    im.file = std::move(fileBytes);
+    View v{im.file.data(), im.file.size()};
+
+    // Not a PE -> treat the whole thing as raw code.
+    if (im.file.size() < 0x40 || v.u16(0) != 0x5A4D /* 'MZ' */) {
+        im.format = "raw";
+        im.code.push_back({0, im.file.size(), 0, "raw"});
+        return im;
+    }
+    uint32_t peOff = v.u32(0x3C);
+    if (!v.ok || peOff + 24 > im.file.size() || v.u32(peOff) != 0x00004550 /* 'PE\0\0' */) {
+        im.format = "raw";
+        im.code.push_back({0, im.file.size(), 0, "raw"});
+        return im;
+    }
+
+    im.isPE = true;
+    uint16_t machine = v.u16(peOff + 4);
+    im.machine = machine == 0x8664 ? "x86-64" : machine == 0x14C ? "x86" : "";
+    uint16_t numSections = v.u16(peOff + 6);
+    uint16_t optSize = v.u16(peOff + 20);
+    size_t opt = peOff + 24;
+    uint16_t magic = v.u16(opt);
+    uint32_t entryRva = v.u32(opt + 16);
+    if (magic == 0x20B) { im.format = "PE32+"; im.imageBase = v.u64(opt + 24); }
+    else { im.format = "PE32"; im.imageBase = v.u32(opt + 28); }
+    im.entry = entryRva ? im.imageBase + entryRva : 0;
+
+    size_t sec = opt + optSize;
+    for (uint16_t i = 0; i < numSections && v.ok; ++i, sec += 40) {
+        char name[9] = {};
+        if (sec + 40 > im.file.size()) break;
+        std::memcpy(name, im.file.data() + sec, 8);
+        uint32_t vsize = v.u32(sec + 8);
+        uint32_t rva   = v.u32(sec + 12);
+        uint32_t rawSz = v.u32(sec + 16);
+        uint32_t rawPtr = v.u32(sec + 20);
+        uint32_t chars = v.u32(sec + 36);
+        bool exec = (chars & 0x20000000u) || (chars & 0x00000020u);   // MEM_EXECUTE | CNT_CODE
+        if (!exec || !rawPtr || !rawSz) continue;
+        size_t size = rawSz;
+        if (vsize && vsize < size) size = vsize;               // trim to the mapped size
+        if (rawPtr >= im.file.size()) continue;
+        if (rawPtr + size > im.file.size()) size = im.file.size() - rawPtr;
+        im.code.push_back({rawPtr, size, im.imageBase + rva, name[0] ? name : "sect"});
+    }
+
+    if (im.code.empty())   // no executable section found -> fall back to the whole file
+        im.code.push_back({0, im.file.size(), im.imageBase, "image"});
+    return im;
 }
 
 } // namespace disasm64
