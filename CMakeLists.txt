@@ -15,6 +15,12 @@ add_library(disasm64 STATIC
     src/relocate.cpp)
 target_include_directories(disasm64 PUBLIC include)
 
+add_executable(disasm64_cli tools/disasm_cli.cpp)
+target_link_libraries(disasm64_cli PRIVATE disasm64)
+
+add_executable(robust fuzz/robust.cpp)
+target_link_libraries(robust PRIVATE disasm64)
+
 enable_testing()
 foreach(t reader prefix decode format relocate)
     add_executable(test_${t} tests/test_${t}.cpp)
@@ -22,3 +28,5 @@ foreach(t reader prefix decode format relocate)
     target_include_directories(test_${t} PRIVATE include tests src)
     add_test(NAME ${t} COMMAND test_${t})
 endforeach()
+
+add_test(NAME robust COMMAND robust --count 300000 --seed 1)
