@@ -15,6 +15,8 @@
 #include "disasm64/disasm64.h"
 #include "disasm64/analysis.h"
 #include "disasm64/loader.h"
+#include "disasm64/image.h"
+#include "disasm64/cfg.h"
 using namespace disasm64;
 
 #pragma comment(lib, "comctl32.lib")
@@ -24,9 +26,10 @@ using namespace disasm64;
 
 namespace {
 
-enum { ID_HEX = 101, ID_BASE = 102, ID_ATT = 103, ID_FLAGS = 104, ID_SEM = 105, ID_OUT = 106, ID_LOAD = 107 };
+enum { ID_HEX = 101, ID_BASE, ID_ATT, ID_FLAGS, ID_SEM, ID_OUT, ID_LOAD, ID_VIEW, ID_GOTO, ID_FIND };
+enum View { V_DISASM = 0, V_IMPORTS, V_EXPORTS, V_STRINGS, V_SECTIONS, V_CFG };
 
-HWND g_hex, g_base, g_att, g_flags, g_sem, g_out, g_load;
+HWND g_hex, g_base, g_att, g_flags, g_sem, g_out, g_load, g_view, g_goto, g_find;
 HFONT g_mono, g_ui;
 LoadedImage g_image;          // last loaded file
 bool g_fileMode = false;      // disassemble g_image instead of the hex box
@@ -160,16 +163,106 @@ int emitRegion(Rtf& rtf, const uint8_t* code, size_t n, uint64_t base, bool att,
     return budget;
 }
 
+void renderImports(Rtf& r) {
+    char line[64];
+    auto imps = parseImports(g_image);
+    std::snprintf(line, sizeof line, "; %zu imports\n\n", imps.size()); r.run(RC_META, line);
+    for (const Import& ip : imps) {
+        std::snprintf(line, sizeof line, "%016llx  ", (unsigned long long)ip.iatVa); r.run(RC_ADDR, line);
+        r.run(RC_MNEM, ip.dll + "!");
+        if (ip.name.empty()) { std::snprintf(line, sizeof line, "#%u\n", ip.ordinal); r.run(RC_TEXT, line); }
+        else r.run(RC_TEXT, ip.name + "\n");
+    }
+}
+
+void renderExports(Rtf& r) {
+    char line[64];
+    auto exps = parseExports(g_image);
+    std::snprintf(line, sizeof line, "; %zu exports\n\n", exps.size()); r.run(RC_META, line);
+    for (const Export& e : exps) {
+        std::snprintf(line, sizeof line, "%016llx  #%-5u ", (unsigned long long)e.va, e.ordinal); r.run(RC_ADDR, line);
+        r.run(RC_MNEM, e.name + "\n");
+    }
+}
+
+void renderStrings(Rtf& r) {
+    char line[64];
+    auto ss = findStrings(g_image, 4);
+    std::snprintf(line, sizeof line, "; %zu strings\n\n", ss.size()); r.run(RC_META, line);
+    for (const FoundString& s : ss) {
+        std::snprintf(line, sizeof line, "%016llx  ", (unsigned long long)s.va); r.run(RC_ADDR, line);
+        r.run(RC_TEXT, (s.wide ? "L\"" : "\"") + s.text + "\"\n");
+    }
+}
+
+void renderSections(Rtf& r) {
+    char line[128];
+    r.run(RC_META, "; sections\n\n");
+    for (const Section& s : g_image.sections) {
+        std::snprintf(line, sizeof line, "%016llx  vsize %-8x raw %-8x %s  ",
+                      (unsigned long long)s.vaddr, s.vsize, s.rawSize, s.exec ? "X" : " "); r.run(RC_ADDR, line);
+        r.run(RC_MNEM, s.name + "\n");
+    }
+}
+
+void renderCfg(Rtf& r) {
+    char line[128];
+    for (const CodeRegion& rg : g_image.code) {
+        if (g_image.entry < rg.vaddr || g_image.entry >= rg.vaddr + rg.size) continue;
+        Cfg cfg = buildCfg(regionData(g_image, rg), rg.size, rg.vaddr, g_image.entry);
+        std::snprintf(line, sizeof line, "; %zu blocks, %zu calls from entry %llx\n\n",
+                      cfg.blocks.size(), cfg.calls.size(), (unsigned long long)g_image.entry); r.run(RC_META, line);
+        for (const BasicBlock& b : cfg.blocks) {
+            std::snprintf(line, sizeof line, "%016llx - %016llx ", (unsigned long long)b.start, (unsigned long long)b.end); r.run(RC_ADDR, line);
+            std::string s = " ->";
+            for (uint64_t x : b.succs) { char t[20]; std::snprintf(t, sizeof t, " %llx", (unsigned long long)x); s += t; }
+            r.run(RC_MNEM, s + "\n");
+        }
+        return;
+    }
+    r.run(RC_BAD, "; entry is not inside a code section\n");
+}
+
+long findOut(const std::wstring& needle, long from) {
+    if (needle.empty()) return -1;
+    FINDTEXTEXW ft = {};
+    ft.chrg.cpMin = from; ft.chrg.cpMax = -1;
+    ft.lpstrText = needle.c_str();
+    LRESULT idx = SendMessageW(g_out, EM_FINDTEXTEXW, FR_DOWN, (LPARAM)&ft);
+    if (idx < 0) return -1;
+    SendMessageW(g_out, EM_EXSETSEL, 0, (LPARAM)&ft.chrgText);
+    SendMessageW(g_out, EM_SCROLLCARET, 0, 0);
+    return long(idx);
+}
+
+void gotoAddr() {
+    std::wstring t = getText(g_goto);
+    if (t.empty()) return;
+    uint64_t va = wcstoull(t.c_str(), nullptr, 16);
+    wchar_t hex[20];
+    wsprintfW(hex, L"%016I64x", va);
+    findOut(hex, 0);
+}
+
 void refresh() {
     bool att   = SendMessageW(g_att, BM_GETCHECK, 0, 0) == BST_CHECKED;
     bool flags = SendMessageW(g_flags, BM_GETCHECK, 0, 0) == BST_CHECKED;
     bool sem   = SendMessageW(g_sem, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    int view = int(SendMessageW(g_view, CB_GETCURSEL, 0, 0));
 
     Rtf rtf;
     rtf.s = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fmodern Consolas;}}" + colorTable() + "\\f0\\fs18 ";
     char line[160];
 
-    if (g_fileMode && !g_image.code.empty()) {
+    if (g_fileMode && !g_image.code.empty() && view != V_DISASM) {
+        switch (view) {
+            case V_IMPORTS:  renderImports(rtf); break;
+            case V_EXPORTS:  renderExports(rtf); break;
+            case V_STRINGS:  renderStrings(rtf); break;
+            case V_SECTIONS: renderSections(rtf); break;
+            case V_CFG:      renderCfg(rtf); break;
+        }
+    } else if (g_fileMode && !g_image.code.empty()) {
         std::snprintf(line, sizeof line, "; %s  %s  imagebase %llx  entry %llx\n\n",
                       g_image.format.c_str(), g_image.machine.empty() ? "?" : g_image.machine.c_str(),
                       (unsigned long long)g_image.imageBase, (unsigned long long)g_image.entry);
@@ -248,7 +341,11 @@ void layout(HWND hwnd) {
     MoveWindow(g_flags, x, ctlY, 84, ctlH, TRUE); x += 90;
     MoveWindow(g_sem, x, ctlY, 100, ctlH, TRUE); x += 110;
     MoveWindow(g_load, x, ctlY, 104, ctlH, TRUE);
-    int outY = ctlY + ctlH + 10;
+    int y3 = ctlY + ctlH + 6, x3 = pad;
+    MoveWindow(g_view, x3, y3, 150, 160, TRUE); x3 += 160;
+    MoveWindow(g_goto, x3, y3, 150, ctlH, TRUE); x3 += 160;
+    MoveWindow(g_find, x3, y3, 200, ctlH, TRUE);
+    int outY = y3 + ctlH + 10;
     MoveWindow(g_out, pad, outY, W - 2 * pad, H - outY - pad, TRUE);
 }
 
@@ -269,6 +366,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_flags = mk(L"BUTTON", L"flags", BS_AUTOCHECKBOX, hwnd, ID_FLAGS, g_ui);
             g_sem   = mk(L"BUTTON", L"semantics", BS_AUTOCHECKBOX, hwnd, ID_SEM, g_ui);
             g_load  = mk(L"BUTTON", L"Load file\x2026", BS_PUSHBUTTON, hwnd, ID_LOAD, g_ui);
+            g_view  = mk(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, hwnd, ID_VIEW, g_ui);
+            for (const wchar_t* s : {L"Disassembly", L"Imports", L"Exports", L"Strings", L"Sections", L"CFG"})
+                SendMessageW(g_view, CB_ADDSTRING, 0, (LPARAM)s);
+            SendMessageW(g_view, CB_SETCURSEL, 0, 0);
+            g_goto  = mk(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER, hwnd, ID_GOTO, g_mono);
+            g_find  = mk(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER, hwnd, ID_FIND, g_mono);
+            SendMessageW(g_goto, EM_SETCUEBANNER, TRUE, (LPARAM)L"goto va");
+            SendMessageW(g_find, EM_SETCUEBANNER, TRUE, (LPARAM)L"find");
             g_out   = mk(MSFTEDIT_CLASS, L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER, hwnd, ID_OUT, g_mono);
             SendMessageW(g_out, EM_SETBKGNDCOLOR, 0, (LPARAM)C_OUTBG);
             SendMessageW(g_out, EM_EXLIMITTEXT, 0, 64 << 20);
@@ -289,6 +394,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (LOWORD(wp) == ID_BASE && HIWORD(wp) == EN_CHANGE) { if (!g_fileMode) refresh(); }
             else if ((LOWORD(wp) == ID_ATT || LOWORD(wp) == ID_FLAGS || LOWORD(wp) == ID_SEM) && HIWORD(wp) == BN_CLICKED) refresh();
             else if (LOWORD(wp) == ID_LOAD && HIWORD(wp) == BN_CLICKED) loadFile(hwnd);
+            else if (LOWORD(wp) == ID_VIEW && HIWORD(wp) == CBN_SELCHANGE) refresh();
+            else if (LOWORD(wp) == ID_GOTO && HIWORD(wp) == EN_CHANGE) gotoAddr();
+            else if (LOWORD(wp) == ID_FIND && HIWORD(wp) == EN_CHANGE) findOut(getText(g_find), 0);
             return 0;
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)wp; SetTextColor(dc, C_TEXT); SetBkColor(dc, C_INPUT);
