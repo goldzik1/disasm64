@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>disasm64 playground</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0d1117; color: #c9d1d9; font: 15px/1.5 system-ui, sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid #21262d; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: #8b949e; font-size: 13px; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  .row { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  label { color: #8b949e; font-size: 13px; }
+  input[type=text] { background: #161b22; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 6px 8px; font-family: ui-monospace, monospace; }
+  textarea { width: 100%; box-sizing: border-box; height: 120px; background: #161b22; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 10px; font-family: ui-monospace, monospace; font-size: 14px; resize: vertical; }
+  pre { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 14px; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 13px; white-space: pre; min-height: 60px; }
+  .status { color: #8b949e; font-size: 13px; }
+  .quirk { color: #d29922; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>disasm64 <span style="color:#8b949e;font-weight:400">playground</span></h1>
+  <p>from-scratch x86-64 disassembler, compiled to WebAssembly. Paste hex bytes.</p>
+</header>
+<main>
+  <div class="row">
+    <label>base <input id="base" type="text" value="0x401000" size="12"></label>
+    <label><input id="att" type="checkbox"> AT&amp;T syntax</label>
+    <span id="status" class="status">loading…</span>
+  </div>
+  <textarea id="hex" spellcheck="false">55 48 89 e5 48 83 ec 20 48 8b 05 10 00 00 00 e8 00 00 00 00 c5 f8 58 c1 62 f1 6c 48 58 cb c9 c3</textarea>
+  <pre id="out"></pre>
+  <p class="status">Built from <a href="https://github.com/goldzik1/disasm64">goldzik1/disasm64</a>.</p>
+</main>
+<script src="disasm64.js"></script>
+<script>
+  let disasm = null;
+  const $ = id => document.getElementById(id);
+  function run() {
+    if (!disasm) return;
+    const base = parseInt($('base').value, 16) || 0;
+    const att = $('att').checked ? 1 : 0;
+    const text = disasm($('hex').value, base, att) || '';
+    $('out').innerHTML = text.split('\n').map(l =>
+      l.includes(' !') ? '<span class="quirk">' + l.replace(/</g, '&lt;') + '</span>' : l.replace(/</g, '&lt;')
+    ).join('\n');
+  }
+  Disasm64Module().then(M => {
+    disasm = M.cwrap('d64_disasm', 'string', ['string', 'number', 'number']);
+    $('status').textContent = 'ready';
+    ['hex', 'base'].forEach(id => $(id).addEventListener('input', run));
+    $('att').addEventListener('change', run);
+    run();
+  }).catch(e => { $('status').textContent = 'failed to load wasm: ' + e; });
+</script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 /build/
+/build-rel/
 /docs/
 *.obj
 *.exe

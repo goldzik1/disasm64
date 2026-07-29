@@ -21,6 +21,14 @@ target_include_directories(disasm64 PUBLIC include)
 add_executable(disasm64_cli tools/disasm_cli.cpp)
 target_link_libraries(disasm64_cli PRIVATE disasm64)
 
+# C ABI shared library for FFI bindings (Python/Rust/Go/C#)
+add_library(disasm64_c SHARED src/c_api.cpp)
+target_link_libraries(disasm64_c PRIVATE disasm64)
+target_include_directories(disasm64_c PUBLIC include)
+
+add_executable(bench tools/bench.cpp)
+target_link_libraries(bench PRIVATE disasm64)
+
 add_executable(robust fuzz/robust.cpp)
 target_link_libraries(robust PRIVATE disasm64)
 
@@ -34,6 +42,13 @@ foreach(t reader prefix decode format att ext encode relocate analysis)
     target_include_directories(test_${t} PRIVATE include tests src)
     add_test(NAME ${t} COMMAND test_${t})
 endforeach()
+
+# C ABI test compiles c_api.cpp into the same binary (D64_BUILD -> no dllimport)
+add_executable(test_capi tests/test_capi.cpp src/c_api.cpp)
+target_link_libraries(test_capi PRIVATE disasm64)
+target_include_directories(test_capi PRIVATE include tests src)
+target_compile_definitions(test_capi PRIVATE D64_BUILD)
+add_test(NAME capi COMMAND test_capi)
 
 add_test(NAME robust COMMAND robust --count 300000 --seed 1)
 

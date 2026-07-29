@@ -149,6 +149,24 @@ is the point, so the same output feeds an analyzer or a lifter, not just a print
 Per-instruction EFLAGS read/written are already on the model (`flagsRead`/`flagsWritten`);
 the CLI surfaces them with `--flags`, and `--att` switches syntax.
 
+## Bindings, playground & speed
+
+A flat **C ABI** (`include/disasm64/c_api.h`, built as `disasm64_c`) exposes decode /
+format / relocate for FFI. On top of it:
+
+- **Python** — `bindings/python/disasm64.py`, ctypes, no build step beyond the shared lib:
+  ```python
+  from disasm64 import Disasm64
+  d = Disasm64()
+  d.format(bytes.fromhex("62f16c4858cb"))   # 'vaddps zmm1, zmm2, zmm3'
+  ```
+- **WebAssembly playground** — `wasm/`: `build.sh` (needs emsdk) compiles to wasm and
+  `playground.html` disassembles pasted hex in the browser, quirk annotations and all.
+
+`tools/bench` measures throughput. On one modern x86 core (Release), the linear decoder
+runs at roughly **34 M instructions/s (~107 MB/s)**; decode + Intel formatting ~9 M/s;
+decode + re-encode ~24 M/s.
+
 ## Roadmap
 
 - Richer semantic metadata: implicit operands, per-operand read/write access,
