@@ -143,6 +143,11 @@ std::string mnemStr(const Instruction& insn) {
                                           "pcmpeqb", "pcmpeqw", "pcmpeqd", "pcmpgtb", "pcmpgtw", "pcmpgtd"};
                 return n[int(m) - int(Mnemonic::Paddb)];
             }
+            if (m >= Mnemonic::Pshufd && m <= Mnemonic::Unpckhpd) {
+                static const char* n[] = {"pshufd", "pshuflw", "pshufhw", "shufps", "shufpd", "movmskps", "movmskpd",
+                                          "pmovmskb", "unpcklps", "unpcklpd", "unpckhps", "unpckhpd"};
+                return n[int(m) - int(Mnemonic::Pshufd)];
+            }
             return "(bad)";
         }
     }
