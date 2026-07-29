@@ -72,6 +72,10 @@ const char* pshiftName(uint8_t op, int reg) {   // 0F 71/72/73 /r group
 bool decode0F38(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
     uint8_t op = r.u8();
+    if ((op == 0xF0 || op == 0xF1) && p.rep == 0xF2) {   // crc32 Gd, Eb/Ev
+        int es = op == 0xF0 ? 1 : SZv(p); int gs = SZv(p); Operand rm; int reg = decodeModRM(r, p, es, rm);
+        insn.rawName = "crc32"; addOp(insn, regOp(makeGpr(reg, gs, p.rex))); addOp(insn, rm); return true;
+    }
     if (op == 0xF0 || op == 0xF1) {   // movbe (GP)
         int s = SZv(p); Operand rm; int reg = decodeModRM(r, p, s, rm);
         insn.rawName = "movbe";
@@ -139,6 +143,18 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op >= 0x90 && op <= 0x9F) { Operand e; decodeModRM(r, p, 1, e); insn.mnemonic = M::Setcc; insn.cc = op & 0xF; addOp(insn, e); return true; }
     if (op == 0xB6 || op == 0xB7) { int es = (op == 0xB6) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movzx; addOp(insn, x.g); addOp(insn, x.e); return true; }
     if (op == 0xBE || op == 0xBF) { int es = (op == 0xBE) ? 1 : 2; auto x = decodeEG(r, p, es, SZv(p)); insn.mnemonic = M::Movsx; addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if (op == 0xBC || op == 0xBD) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.rawName = op == 0xBC ? (p.rep == 0xF3 ? "tzcnt" : "bsf") : (p.rep == 0xF3 ? "lzcnt" : "bsr"); addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if (op == 0xB8 && p.rep == 0xF3) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.rawName = "popcnt"; addOp(insn, x.g); addOp(insn, x.e); return true; }
+    if (op == 0xAE) {
+        uint8_t m = r.peek();
+        if (m == 0xE8) { r.u8(); insn.rawName = "lfence"; return true; }
+        if (m == 0xF0) { r.u8(); insn.rawName = "mfence"; return true; }
+        if (m == 0xF8) { r.u8(); insn.rawName = "sfence"; return true; }
+        int reg = (m >> 3) & 7; const char* nm = reg == 2 ? "ldmxcsr" : reg == 3 ? "stmxcsr" : reg == 7 ? "clflush" : nullptr;
+        if (!nm) return false;
+        Operand rm; decodeModRM(r, p, 4, rm); insn.rawName = nm; addOp(insn, rm); return true;
+    }
+    if (op == 0x01) { if (r.peek() == 0xF9) { r.u8(); insn.rawName = "rdtscp"; return true; } return false; }
     if (op == 0xB0 || op == 0xB1) { int s = op == 0xB0 ? 1 : SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = M::Cmpxchg; addOp(insn, x.e); addOp(insn, x.g); return true; }
     if (op == 0xC0 || op == 0xC1) { int s = op == 0xC0 ? 1 : SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = M::Xadd; addOp(insn, x.e); addOp(insn, x.g); return true; }
     if (op == 0xA3 || op == 0xAB || op == 0xB3 || op == 0xBB) { int s = SZv(p); auto x = decodeEG(r, p, s, s); insn.mnemonic = op == 0xA3 ? M::Bt : op == 0xAB ? M::Bts : op == 0xB3 ? M::Btr : M::Btc; addOp(insn, x.e); addOp(insn, x.g); return true; }
