@@ -1,4 +1,5 @@
 #include "disasm64/disasm64.h"
+#include "fmt.h"
 #include <string>
 #include <cstdio>
 
@@ -182,5 +183,8 @@ std::string formatIntel(const Instruction& insn) {
     }
     return s;
 }
+
+std::string mnemonicName(const Instruction& insn) { return mnemStr(insn); }
+std::string registerName(const Reg& reg) { return regName(reg); }
 
 } // namespace disasm64

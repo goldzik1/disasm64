@@ -12,6 +12,7 @@ add_library(disasm64 STATIC
     src/operand.cpp
     src/decode.cpp
     src/format_intel.cpp
+    src/format_att.cpp
     src/relocate.cpp
     src/analysis.cpp)
 target_include_directories(disasm64 PUBLIC include)
@@ -23,7 +24,7 @@ add_executable(robust fuzz/robust.cpp)
 target_link_libraries(robust PRIVATE disasm64)
 
 enable_testing()
-foreach(t reader prefix decode format relocate analysis)
+foreach(t reader prefix decode format att relocate analysis)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE disasm64)
     target_include_directories(test_${t} PRIVATE include tests src)
