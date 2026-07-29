@@ -7,7 +7,7 @@
 A from-scratch x86-64 instruction decoder in C++17. No Capstone, no Zydis, no
 dependencies — drop the headers and `src/` into a project and you have a disassembler.
 It decodes a byte stream into a structured instruction (mnemonic, typed operands with
-sizes, prefixes, length), resolves RIP-relative addressing, and prints Intel syntax.
+sizes, prefixes, length), resolves RIP-relative addressing, and prints Intel or AT&T syntax.
 
 But decoding is table stakes. What this does that a plain disassembler doesn't:
 
@@ -46,6 +46,12 @@ pavg/psad/pmin/pmax and the shift families), shuffles, blends, `ptest`, `pmovzx/
 two-, and three-byte (`0F38`/`0F3A`) maps. Every one of these has its **AVX (VEX)** form
 too: three-operand `vaddss xmm0, xmm1, xmm2`, `vpshufb ymm0, ymm0, ymm1`, ymm operands,
 2- and 3-byte VEX.
+
+The **x87 FPU** — the full `D8`–`DF` map, both the memory forms (`fld`/`fst`/`fadd`/
+`fild`/`fbld` sized down to `tbyte ptr`) and the `mod == 3` register forms: the `st(i)`
+arithmetic, `fcmov*`, `fucomi`/`fcomi`, the load-constant and transcendental group
+(`fld1`/`fldpi`/`fsin`/`fpatan`/`f2xm1`…), `fnstsw ax`, and the `fsub`/`fsubr` reg-form
+swap handled per the SDM.
 
 The decoder is fuzzed to never crash, hang, or return a nonsense length on arbitrary
 input — millions of random decodes, zero anomalies.
@@ -96,18 +102,19 @@ C++17, no dependencies, builds with MSVC or gcc/clang. Regenerate the single hea
 `decode(bytes, n, address)` returns a `DecodeResult` with a status and an
 `Instruction`: mnemonic, up to four typed `Operand`s (register / memory / immediate /
 relative, each with a size), the prefixes, the length, and a `positionDependent` flag.
-The Intel formatter is a thin layer over that model — the structured decode is the
-point, so the same output feeds an analyzer or a lifter, not just a printer.
+The **Intel and AT&T** formatters are thin layers over that model — the structured decode
+is the point, so the same output feeds an analyzer or a lifter, not just a printer.
+Per-instruction EFLAGS read/written are already on the model (`flagsRead`/`flagsWritten`);
+the CLI surfaces them with `--flags`, and `--att` switches syntax.
 
 ## Roadmap
 
-- Semantic metadata: per-instruction EFLAGS read/written, implicit operands, per-operand
-  read/write access, ISA-set / category.
-- The remaining long tail (pinsr/pextr, x87, AVX-512) emitted from a permissive open ISA
-  dataset and committed so the build stays dependency-free.
-- AT&T syntax — the formatter is separate from the decoder, so it slots in without
-  touching decode.
+- Richer semantic metadata: implicit operands, per-operand read/write access,
+  ISA-set / category.
+- AVX-512 / EVEX, emitted from a permissive open ISA dataset and committed so the build
+  stays dependency-free.
+- External differential validation against `llvm-mc` over a large corpus.
 
 ## Scope
 
-x86-64 long mode, Intel syntax. AVX-512 / EVEX is out of scope for now.
+x86-64 long mode, Intel and AT&T syntax. AVX-512 / EVEX is out of scope for now.
