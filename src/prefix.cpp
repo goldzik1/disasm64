@@ -23,11 +23,8 @@ bool decodePrefixes(Reader& r, Prefixes& pfx) {
         break;
     }
 
-    // VEX must come before REX and is mutually exclusive with it.
     uint8_t b = r.peek();
-    if (b == 0xC5 || b == 0xC4) {
-        // Only a VEX if the following byte's top bits look like VEX (in 64-bit the
-        // legacy LDS/LES forms don't exist, so C4/C5 are always VEX here).
+    if (b == 0xC5 || b == 0xC4) {   // C4/C5 are always VEX in 64-bit
         pfx.vex = true;
         r.u8();
         if (b == 0xC5) {          // 2-byte VEX
@@ -49,7 +46,7 @@ bool decodePrefixes(Reader& r, Prefixes& pfx) {
             pfx.vexL = (v2 >> 2) & 1;
             pfx.vexPP = v2 & 3;
         }
-        pfx.rex = true;           // VEX carries REX-equivalent bits
+        pfx.rex = true;
         return r.ok();
     }
 

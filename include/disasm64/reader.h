@@ -4,9 +4,6 @@
 
 namespace disasm64 {
 
-// Bounds-checked forward byte cursor. `overflow` latches once a read runs past the
-// end, so a decoder can keep going and report Truncated at the end instead of
-// branching on every read.
 struct Reader {
     const uint8_t* p;
     size_t n;
@@ -24,8 +21,7 @@ struct Reader {
     uint32_t u32() { uint32_t v = 0; for (int i = 0; i < 4; ++i) v |= uint32_t(u8()) << (8 * i); return v; }
     uint64_t u64() { uint64_t v = 0; for (int i = 0; i < 8; ++i) v |= uint64_t(u8()) << (8 * i); return v; }
 
-    // Sign-extended immediates of a given width (1/2/4/8 bytes) to int64.
-    int64_t imm(int width) {
+    int64_t imm(int width) {   // sign-extended, width 1/2/4/8
         switch (width) {
             case 1: return int8_t(u8());
             case 2: return int16_t(u16());

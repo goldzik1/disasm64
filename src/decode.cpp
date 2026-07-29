@@ -70,8 +70,7 @@ bool decode0F(Reader& r, Instruction& insn) {
     if (op == 0xBA) { int s = SZv(p); Operand e; int reg = decodeModRM(r, p, s, e); M mm = (reg & 7) == 4 ? M::Bt : (reg & 7) == 5 ? M::Bts : (reg & 7) == 6 ? M::Btr : (reg & 7) == 7 ? M::Btc : M::Invalid; insn.mnemonic = mm; addOp(insn, e); addOp(insn, immOp(r, 1)); return mm != M::Invalid; }
     if (op >= 0xC8 && op <= 0xCF) { insn.mnemonic = M::Bswap; addOp(insn, regOp(makeGpr((op - 0xC8) | (p.rexB ? 8 : 0), SZv(p), p.rex))); return true; }
 
-    // SSE (curated subset). Mandatory prefix selects the variant: none/66/F3/F2.
-    const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;
+    const int pp = p.rep == 0xF3 ? 2 : p.rep == 0xF2 ? 3 : p.opsize ? 1 : 0;   // mandatory prefix
     auto xmm = [](int idx) { Operand o; o.kind = OperandKind::Reg; o.reg.cls = RegClass::Xmm; o.reg.idx = uint8_t(idx); o.sizeBytes = 16; return o; };
     auto vecEG = [&](int memSz, bool store) {
         Operand rm; int reg = decodeModRM(r, p, memSz, rm, RegClass::Xmm);

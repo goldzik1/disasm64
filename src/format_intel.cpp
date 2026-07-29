@@ -143,9 +143,7 @@ std::string mnemStr(const Instruction& insn) {
 std::string formatIntel(const Instruction& insn) {
     std::string s;
     if (insn.prefixes.lock) s += "lock ";
-    // rep/repne is only a real prefix on the string ops; on SSE, F3/F2 are mandatory
-    // prefixes that select the opcode, not a rep prefix to be printed.
-    const Mnemonic m = insn.mnemonic;
+    const Mnemonic m = insn.mnemonic;   // rep/repne only prints on string ops (F3/F2 are mandatory on SSE)
     const bool strOp = m == Mnemonic::Movs || m == Mnemonic::Stos || m == Mnemonic::Lods ||
                        m == Mnemonic::Scas || m == Mnemonic::Cmps;
     if (strOp && insn.prefixes.rep == 0xF3) s += "rep ";

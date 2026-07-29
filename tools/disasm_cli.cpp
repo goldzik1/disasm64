@@ -1,6 +1,4 @@
-// Tiny linear disassembler CLI: pass hex bytes and it prints Intel disassembly.
-//   disasm64 48 89 e5 e8 00 00 00 00
-//   disasm64 --base 0x401000 55 48 89 e5
+// disasm64 [--base 0xADDR] <hex bytes...>
 #include "disasm64/disasm64.h"
 #include <cstdio>
 #include <cstdlib>

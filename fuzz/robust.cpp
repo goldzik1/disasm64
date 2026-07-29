@@ -1,8 +1,3 @@
-// Robustness fuzzer: the decoder must never crash, hang, or report a nonsense length
-// on arbitrary input. Two modes run together:
-//   - single decode of random 16-byte windows (status + length invariants),
-//   - linear sweep of a random buffer, advancing by each instruction's length, which
-//     must always make forward progress and terminate.
 #include "disasm64/disasm64.h"
 #include <cstdio>
 #include <cstdlib>
@@ -33,8 +28,7 @@ int main(int argc, char** argv) {
         else ++trunc;
     }
 
-    // Linear sweep: fill a buffer, walk it instruction-by-instruction; length must be >=1.
-    uint8_t buf[4096];
+    uint8_t buf[4096];   // linear sweep
     for (int rounds = 0; rounds < 200; ++rounds) {
         for (int k = 0; k < 4096; ++k) buf[k] = uint8_t(rng.next());
         size_t pos = 0; long steps = 0;

@@ -3,8 +3,6 @@
 #include <vector>
 using namespace disasm64;
 
-// A RIP-relative load and a rel32 call keep the same effective target after being
-// moved to a new address; a rel8 branch that no longer reaches fails cleanly.
 TEST_MAIN({
     // mov rax, [rip+0x10] at 0x1000 -> target 0x1017; move to 0x2000, target must hold.
     {
