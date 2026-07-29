@@ -75,6 +75,8 @@ enum class Mnemonic : uint16_t {
     Sqrtps, Sqrtpd, Sqrtss, Sqrtsd, Ucomiss, Ucomisd, Comiss, Comisd,
     Cvtsi2ss, Cvtsi2sd, Cvttss2si, Cvttsd2si, Cvtss2si, Cvtsd2si,
     Cvtss2sd, Cvtsd2ss, Cvtps2pd, Cvtpd2ps, Cvtdq2ps, Cvtps2dq, Cvttps2dq,
+    Paddb, Paddw, Paddd, Paddq, Psubb, Psubw, Psubd, Psubq,
+    Pcmpeqb, Pcmpeqw, Pcmpeqd, Pcmpgtb, Pcmpgtw, Pcmpgtd,
     Count
 };
 

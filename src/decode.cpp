@@ -104,6 +104,20 @@ bool decode0F(Reader& r, Instruction& insn) {
         case 0xDF: if (pp != 1) return false; insn.mnemonic = M::Pandn; vecEG(16, false); return true;
         case 0xEB: if (pp != 1) return false; insn.mnemonic = M::Por; vecEG(16, false); return true;
         case 0xEF: { if (pp != 1) return false; insn.mnemonic = M::Pxor; vecEG(16, false); return true; }
+        case 0xFC: if (pp != 1) return false; insn.mnemonic = M::Paddb; vecEG(16, false); return true;
+        case 0xFD: if (pp != 1) return false; insn.mnemonic = M::Paddw; vecEG(16, false); return true;
+        case 0xFE: if (pp != 1) return false; insn.mnemonic = M::Paddd; vecEG(16, false); return true;
+        case 0xD4: if (pp != 1) return false; insn.mnemonic = M::Paddq; vecEG(16, false); return true;
+        case 0xF8: if (pp != 1) return false; insn.mnemonic = M::Psubb; vecEG(16, false); return true;
+        case 0xF9: if (pp != 1) return false; insn.mnemonic = M::Psubw; vecEG(16, false); return true;
+        case 0xFA: if (pp != 1) return false; insn.mnemonic = M::Psubd; vecEG(16, false); return true;
+        case 0xFB: if (pp != 1) return false; insn.mnemonic = M::Psubq; vecEG(16, false); return true;
+        case 0x74: if (pp != 1) return false; insn.mnemonic = M::Pcmpeqb; vecEG(16, false); return true;
+        case 0x75: if (pp != 1) return false; insn.mnemonic = M::Pcmpeqw; vecEG(16, false); return true;
+        case 0x76: if (pp != 1) return false; insn.mnemonic = M::Pcmpeqd; vecEG(16, false); return true;
+        case 0x64: if (pp != 1) return false; insn.mnemonic = M::Pcmpgtb; vecEG(16, false); return true;
+        case 0x65: if (pp != 1) return false; insn.mnemonic = M::Pcmpgtw; vecEG(16, false); return true;
+        case 0x66: if (pp != 1) return false; insn.mnemonic = M::Pcmpgtd; vecEG(16, false); return true;
         case 0x6E: { if (pp != 1) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm);
             insn.mnemonic = p.rexW ? M::Movq : M::Movd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
         case 0x7E: {
