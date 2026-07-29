@@ -52,20 +52,20 @@ int decodeModRM(Reader& r, const Prefixes& pfx, int rmSizeBytes, Operand& rm, Re
         }
         if ((sib & 7) == 5 && mod == 0) {
             m.base.cls = RegClass::None;          // no base, disp32
-            m.dispOffset = uint8_t(r.pos); m.disp = r.imm(4);
+            m.dispOffset = uint8_t(r.pos); m.dispSize = 4; m.disp = r.imm(4);
         } else {
             m.base.cls = addrCls; m.base.idx = uint8_t(base);
-            if (mod == 1) { m.dispOffset = uint8_t(r.pos); m.disp = r.imm(1); }
-            else if (mod == 2) { m.dispOffset = uint8_t(r.pos); m.disp = r.imm(4); }
+            if (mod == 1) { m.dispOffset = uint8_t(r.pos); m.dispSize = 1; m.disp = r.imm(1); }
+            else if (mod == 2) { m.dispOffset = uint8_t(r.pos); m.dispSize = 4; m.disp = r.imm(4); }
         }
     } else if (rmf == 5 && mod == 0) {    // RIP-relative
         m.ripRelative = true;
         m.base.cls = RegClass::Rip;
-        m.dispOffset = uint8_t(r.pos); m.disp = r.imm(4);
+        m.dispOffset = uint8_t(r.pos); m.dispSize = 4; m.disp = r.imm(4);
     } else {
         m.base.cls = addrCls; m.base.idx = uint8_t(rmf | (pfx.rexB ? 8 : 0));
-        if (mod == 1) { m.dispOffset = uint8_t(r.pos); m.disp = r.imm(1); }
-        else if (mod == 2) { m.dispOffset = uint8_t(r.pos); m.disp = r.imm(4); }
+        if (mod == 1) { m.dispOffset = uint8_t(r.pos); m.dispSize = 1; m.disp = r.imm(1); }
+        else if (mod == 2) { m.dispOffset = uint8_t(r.pos); m.dispSize = 4; m.disp = r.imm(4); }
     }
 
     rm.mem = m;

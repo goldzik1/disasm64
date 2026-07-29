@@ -1,5 +1,6 @@
 // disasm64 [--base 0xADDR] <hex bytes...>
 #include "disasm64/disasm64.h"
+#include "disasm64/analysis.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,7 +26,12 @@ int main(int argc, char** argv) {
         if (r.status == DecodeStatus::Ok) std::printf(" %s\n", formatIntel(r.insn).c_str());
         else if (r.status == DecodeStatus::Truncated) { std::printf(" (truncated)\n"); break; }
         else std::printf(" (bad)\n");
+        if (r.status == DecodeStatus::Ok)
+            for (const char* q : analyzeEncoding(code.data() + pos, code.size() - pos, base + pos))
+                std::printf("%18s  ! %s\n", "", q);
         pos += len;
     }
+    for (const SweepIssue& s : antiDisasmScan(code.data(), code.size(), base))
+        std::printf("%016llx  !! %s\n", (unsigned long long)s.address, s.what);
     return 0;
 }

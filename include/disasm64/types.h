@@ -25,6 +25,7 @@ struct MemOperand {
     uint8_t segment = 0xFF;   // 0xFF none; else Sreg index
     uint64_t ripTarget = 0;
     uint8_t dispOffset = 0;   // disp field offset within the instruction
+    uint8_t dispSize = 0;     // encoded disp width: 0, 1, 4
 };
 
 struct Operand {
