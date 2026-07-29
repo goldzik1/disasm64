@@ -85,6 +85,10 @@ bool decode0F(Reader& r, Instruction& insn) {
         case 0x5C: sseArith(M::Subps); return true;
         case 0x5E: sseArith(M::Divps); return true;
         case 0x51: sseArith(M::Sqrtps); return true;
+        case 0x2A: { if (pp != 2 && pp != 3) return false; int gs = p.rexW ? 8 : 4; Operand rm; int reg = decodeModRM(r, p, gs, rm); insn.mnemonic = pp == 2 ? M::Cvtsi2ss : M::Cvtsi2sd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
+        case 0x2C: case 0x2D: { if (pp != 2 && pp != 3) return false; int ms = pp == 2 ? 4 : 8; Operand rm; int reg = decodeModRM(r, p, ms, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; int gs = p.rexW ? 8 : 4; bool tr = op == 0x2C; insn.mnemonic = tr ? (pp == 2 ? M::Cvttss2si : M::Cvttsd2si) : (pp == 2 ? M::Cvtss2si : M::Cvtsd2si); addOp(insn, regOp(makeGpr(reg, gs, p.rex))); addOp(insn, rm); return true; }
+        case 0x5A: { int ms = pp == 2 ? 4 : pp == 3 ? 8 : 16; Operand rm; int reg = decodeModRM(r, p, ms, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 2 ? M::Cvtss2sd : pp == 3 ? M::Cvtsd2ss : pp == 1 ? M::Cvtpd2ps : M::Cvtps2pd; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
+        case 0x5B: { if (pp == 3) return false; Operand rm; int reg = decodeModRM(r, p, 16, rm, RegClass::Xmm); if (rm.kind == OperandKind::Reg) rm.sizeBytes = 16; insn.mnemonic = pp == 0 ? M::Cvtdq2ps : pp == 1 ? M::Cvtps2dq : M::Cvttps2dq; addOp(insn, xmm(reg)); addOp(insn, rm); return true; }
         case 0x2E: if (pp >= 2) return false; { int msz = pp == 1 ? 8 : 4; insn.mnemonic = M(int(M::Ucomiss) + pp); vecEG(msz, false); } return true;
         case 0x2F: if (pp >= 2) return false; { int msz = pp == 1 ? 8 : 4; insn.mnemonic = M(int(M::Comiss) + pp); vecEG(msz, false); } return true;
         case 0x10: case 0x11: { int msz = (pp == 2) ? 4 : (pp == 3) ? 8 : 16;

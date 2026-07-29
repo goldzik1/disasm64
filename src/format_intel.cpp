@@ -133,6 +133,11 @@ std::string mnemStr(const Instruction& insn) {
                 static const char* n[] = {"ucomiss", "ucomisd", "comiss", "comisd"};
                 return n[int(m) - int(Mnemonic::Ucomiss)];
             }
+            if (m >= Mnemonic::Cvtsi2ss && m <= Mnemonic::Cvttps2dq) {
+                static const char* n[] = {"cvtsi2ss", "cvtsi2sd", "cvttss2si", "cvttsd2si", "cvtss2si", "cvtsd2si",
+                                          "cvtss2sd", "cvtsd2ss", "cvtps2pd", "cvtpd2ps", "cvtdq2ps", "cvtps2dq", "cvttps2dq"};
+                return n[int(m) - int(Mnemonic::Cvtsi2ss)];
+            }
             return "(bad)";
         }
     }
