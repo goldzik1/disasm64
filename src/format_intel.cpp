@@ -105,6 +105,7 @@ std::string mnemStr(const Instruction& insn) {
         case Mnemonic::Sti: return "sti"; case Mnemonic::Pushf: return "pushf"; case Mnemonic::Popf: return "popf";
         case Mnemonic::Bswap: return "bswap"; case Mnemonic::Xadd: return "xadd"; case Mnemonic::Cmpxchg: return "cmpxchg";
         case Mnemonic::Bt: return "bt"; case Mnemonic::Bts: return "bts"; case Mnemonic::Btr: return "btr"; case Mnemonic::Btc: return "btc";
+        case Mnemonic::Endbr64: return "endbr64"; case Mnemonic::Endbr32: return "endbr32";
         case Mnemonic::Movs: case Mnemonic::Stos: case Mnemonic::Lods: case Mnemonic::Scas: case Mnemonic::Cmps: {
             const char* base = insn.mnemonic == Mnemonic::Movs ? "movs" : insn.mnemonic == Mnemonic::Stos ? "stos" :
                                insn.mnemonic == Mnemonic::Lods ? "lods" : insn.mnemonic == Mnemonic::Scas ? "scas" : "cmps";

@@ -54,6 +54,7 @@ bool decode0F(Reader& r, Instruction& insn) {
     uint8_t op = r.u8();
     if (op == 0x05) { insn.mnemonic = M::Syscall; return true; }
     if (op == 0x0B) { insn.mnemonic = M::Ud2; return true; }
+    if (op == 0x1E) { if (p.rep == 0xF3) { uint8_t m = r.u8(); if (m == 0xFA) { insn.mnemonic = M::Endbr64; return true; } if (m == 0xFB) { insn.mnemonic = M::Endbr32; return true; } } return false; }
     if (op == 0x1F) { Operand e; decodeModRM(r, p, SZv(p), e); insn.mnemonic = M::Nop; addOp(insn, e); return true; }
     if (op == 0x31) { insn.mnemonic = M::Rdtsc; return true; }
     if (op == 0xA2) { insn.mnemonic = M::Cpuid; return true; }
