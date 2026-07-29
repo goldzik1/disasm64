@@ -170,4 +170,11 @@ std::vector<Match> patternSearch(const LoadedImage& im, const std::string& patte
     return out;
 }
 
+bool applyPatch(LoadedImage& im, uint64_t va, const uint8_t* bytes, size_t n) {
+    size_t off = vaToOffset(im, va);
+    if (off == SIZE_MAX || off + n > im.file.size()) return false;
+    std::memcpy(im.file.data() + off, bytes, n);
+    return true;
+}
+
 } // namespace disasm64

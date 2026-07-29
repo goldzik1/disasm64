@@ -41,4 +41,8 @@ std::vector<FoundString> findStrings(const LoadedImage& im, size_t minLen = 4);
 // e.g. "48 8B ?? C0". Returns every match's address.
 std::vector<Match> patternSearch(const LoadedImage& im, const std::string& pattern);
 
+// Overwrite bytes at a virtual address in the image's file buffer (a raw patch). Returns
+// false if the address or range is not backed by file data. Save im.file to persist it.
+bool applyPatch(LoadedImage& im, uint64_t va, const uint8_t* bytes, size_t n);
+
 } // namespace disasm64

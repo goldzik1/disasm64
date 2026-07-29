@@ -33,4 +33,11 @@ TEST_MAIN({
 
     // no match
     CHECK_EQ(int(patternSearch(im, "de ad be ef").size()), 0);
+
+    // patching writes through to the file buffer
+    uint8_t nop[] = {0x90, 0x90, 0x90};
+    CHECK(applyPatch(im, 0x100C, nop, 3));                 // over the "48 8B 05" pattern
+    CHECK_EQ(int(im.file[12]), 0x90);
+    CHECK_EQ(int(im.file[14]), 0x90);
+    CHECK(!applyPatch(im, 0x9999, nop, 3));                // out of range
 })

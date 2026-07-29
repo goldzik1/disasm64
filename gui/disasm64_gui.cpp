@@ -26,10 +26,12 @@ using namespace disasm64;
 
 namespace {
 
-enum { ID_HEX = 101, ID_BASE, ID_ATT, ID_FLAGS, ID_SEM, ID_OUT, ID_LOAD, ID_VIEW, ID_GOTO, ID_FIND };
+enum { ID_HEX = 101, ID_BASE, ID_ATT, ID_FLAGS, ID_SEM, ID_OUT, ID_LOAD, ID_VIEW, ID_GOTO, ID_FIND,
+       ID_PATCHVA, ID_PATCHBYTES, ID_PATCH, ID_SAVE };
 enum View { V_DISASM = 0, V_IMPORTS, V_EXPORTS, V_STRINGS, V_SECTIONS, V_CFG };
 
 HWND g_hex, g_base, g_att, g_flags, g_sem, g_out, g_load, g_view, g_goto, g_find;
+HWND g_patchva, g_patchbytes, g_patch, g_save;
 HFONT g_mono, g_ui;
 LoadedImage g_image;          // last loaded file
 bool g_fileMode = false;      // disassemble g_image instead of the hex box
@@ -322,6 +324,39 @@ void loadFile(HWND hwnd) {
     if (GetOpenFileNameW(&ofn)) loadPath(hwnd, path);
 }
 
+void doPatch() {
+    if (!g_fileMode) return;
+    uint64_t va = wcstoull(getText(g_patchva).c_str(), nullptr, 16);
+    std::vector<uint8_t> b;
+    int hi = -1;
+    for (wchar_t c : getText(g_patchbytes)) {
+        int v = hexv((int)c);
+        if (v < 0) { hi = -1; continue; }
+        if (hi < 0) hi = v; else { b.push_back(uint8_t(hi * 16 + v)); hi = -1; }
+    }
+    if (b.empty()) return;
+    if (applyPatch(g_image, va, b.data(), b.size())) refresh();
+    else MessageBeep(MB_ICONWARNING);
+}
+
+void doSave(HWND hwnd) {
+    if (g_image.file.empty()) return;
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof ofn;
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = L"All files\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT;
+    if (!GetSaveFileNameW(&ofn)) return;
+    HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD wr = 0;
+    WriteFile(h, g_image.file.data(), DWORD(g_image.file.size()), &wr, nullptr);
+    CloseHandle(h);
+}
+
 HWND mk(const wchar_t* cls, const wchar_t* text, DWORD style, HWND parent, int id, HFONT font) {
     HWND h = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
                              parent, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
@@ -345,7 +380,12 @@ void layout(HWND hwnd) {
     MoveWindow(g_view, x3, y3, 150, 160, TRUE); x3 += 160;
     MoveWindow(g_goto, x3, y3, 150, ctlH, TRUE); x3 += 160;
     MoveWindow(g_find, x3, y3, 200, ctlH, TRUE);
-    int outY = y3 + ctlH + 10;
+    int y4 = y3 + ctlH + 6, x4 = pad;
+    MoveWindow(g_patchva, x4, y4, 150, ctlH, TRUE); x4 += 160;
+    MoveWindow(g_patchbytes, x4, y4, 250, ctlH, TRUE); x4 += 260;
+    MoveWindow(g_patch, x4, y4, 70, ctlH, TRUE); x4 += 78;
+    MoveWindow(g_save, x4, y4, 80, ctlH, TRUE);
+    int outY = y4 + ctlH + 10;
     MoveWindow(g_out, pad, outY, W - 2 * pad, H - outY - pad, TRUE);
 }
 
@@ -374,6 +414,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_find  = mk(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER, hwnd, ID_FIND, g_mono);
             SendMessageW(g_goto, EM_SETCUEBANNER, TRUE, (LPARAM)L"goto va");
             SendMessageW(g_find, EM_SETCUEBANNER, TRUE, (LPARAM)L"find");
+            g_patchva    = mk(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER, hwnd, ID_PATCHVA, g_mono);
+            g_patchbytes = mk(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER, hwnd, ID_PATCHBYTES, g_mono);
+            g_patch      = mk(L"BUTTON", L"Patch", BS_PUSHBUTTON, hwnd, ID_PATCH, g_ui);
+            g_save       = mk(L"BUTTON", L"Save\x2026", BS_PUSHBUTTON, hwnd, ID_SAVE, g_ui);
+            SendMessageW(g_patchva, EM_SETCUEBANNER, TRUE, (LPARAM)L"patch va");
+            SendMessageW(g_patchbytes, EM_SETCUEBANNER, TRUE, (LPARAM)L"hex bytes");
             g_out   = mk(MSFTEDIT_CLASS, L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER, hwnd, ID_OUT, g_mono);
             SendMessageW(g_out, EM_SETBKGNDCOLOR, 0, (LPARAM)C_OUTBG);
             SendMessageW(g_out, EM_EXLIMITTEXT, 0, 64 << 20);
@@ -397,6 +443,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (LOWORD(wp) == ID_VIEW && HIWORD(wp) == CBN_SELCHANGE) refresh();
             else if (LOWORD(wp) == ID_GOTO && HIWORD(wp) == EN_CHANGE) gotoAddr();
             else if (LOWORD(wp) == ID_FIND && HIWORD(wp) == EN_CHANGE) findOut(getText(g_find), 0);
+            else if (LOWORD(wp) == ID_PATCH && HIWORD(wp) == BN_CLICKED) doPatch();
+            else if (LOWORD(wp) == ID_SAVE && HIWORD(wp) == BN_CLICKED) doSave(hwnd);
             return 0;
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)wp; SetTextColor(dc, C_TEXT); SetBkColor(dc, C_INPUT);
@@ -437,7 +485,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int nShow) {
     RegisterClassExW(&wc);
 
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"disasm64",
-                                WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1000, 720,
+                                WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1000, 800,
                                 nullptr, nullptr, hInst, nullptr);
     ShowWindow(hwnd, nShow);
     UpdateWindow(hwnd);

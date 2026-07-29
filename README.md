@@ -34,14 +34,22 @@ $ disasm64 --base 0x401000 66 66 90 48 8b 80 05 00 00 00 eb 01 48 90
 
 ## Desktop GUI
 
-A small native front-end (`gui/`, Win32, dark theme, no dependencies) disassembles as you
-type, with syntax colouring and the same quirk / anti-disassembly annotations. **Drop a
-`.exe`/`.dll`/`.sys` on the window** (or use *Load file…*) and it parses the PE, finds the
-executable sections and disassembles them at their real virtual addresses — image base,
-entry point and all. Grab the prebuilt `disasm64_gui.exe` from the
+A small native front-end (`gui/`, Win32, dark theme, no dependencies) is a real little
+disassembler workbench:
+
+- **Drop a `.exe`/`.dll`/`.sys`/ELF on the window** (or *Load file…*) — it parses the
+  headers, finds the executable sections and disassembles them at their real virtual
+  addresses, image base and entry point included.
+- A **view switch** flips the pane between the disassembly and the **import table, export
+  table, strings, sections, and the recovered CFG**.
+- **goto-VA** scrolls to an address, **find** searches the listing.
+- **patch** bytes at an address and **Save…** writes the modified file back out.
+
+Grab the prebuilt `disasm64_gui.exe` from the
 [latest release](https://github.com/goldzik1/disasm64/releases/latest) and just run it, or
-build it with `cmake --build build --target disasm64_gui`. The CLI does the same headless:
-`disasm64 --file program.exe --sem`.
+build it with `cmake --build build --target disasm64_gui`. The CLI does it all headless too:
+`disasm64 --file program.exe --sem` / `--imports` / `--strings` / `--cfg` /
+`--pattern "48 8B ?? C0"` / `--patch VA:BYTES --save out.exe`.
 
 ![disasm64 GUI](gui/screenshot.png)
 

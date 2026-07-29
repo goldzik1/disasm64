@@ -56,11 +56,15 @@ int main(int argc, char** argv) {
     bool doImports = false, doExports = false, doStrings = false, doCfg = false;
     const char* filePath = nullptr;
     const char* pattern = nullptr;
+    const char* patchSpec = nullptr;
+    const char* savePath = nullptr;
     std::vector<uint8_t> code;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--base") && i + 1 < argc) { base = std::strtoull(argv[++i], nullptr, 0); continue; }
         if (!std::strcmp(argv[i], "--file") && i + 1 < argc) { filePath = argv[++i]; continue; }
         if (!std::strcmp(argv[i], "--pattern") && i + 1 < argc) { pattern = argv[++i]; continue; }
+        if (!std::strcmp(argv[i], "--patch") && i + 1 < argc) { patchSpec = argv[++i]; continue; }
+        if (!std::strcmp(argv[i], "--save") && i + 1 < argc) { savePath = argv[++i]; continue; }
         if (!std::strcmp(argv[i], "--imports")) { doImports = true; continue; }
         if (!std::strcmp(argv[i], "--exports")) { doExports = true; continue; }
         if (!std::strcmp(argv[i], "--strings")) { doStrings = true; continue; }
@@ -79,6 +83,21 @@ int main(int argc, char** argv) {
         if (!data.empty()) { size_t got = std::fread(data.data(), 1, data.size(), f); data.resize(got); }
         std::fclose(f);
         LoadedImage im = loadImage(std::move(data));
+        if (patchSpec) {   // "va:hexbytes"
+            uint64_t va = std::strtoull(patchSpec, nullptr, 16);
+            const char* hx = std::strchr(patchSpec, ':');
+            std::vector<uint8_t> pb;
+            if (hx) { int hi = -1; for (const char* p = hx + 1; *p; ++p) {
+                int v = (*p >= '0' && *p <= '9') ? *p - '0' : (*p | 0x20) >= 'a' && (*p | 0x20) <= 'f' ? (*p | 0x20) - 'a' + 10 : -1;
+                if (v < 0) { hi = -1; continue; } if (hi < 0) hi = v; else { pb.push_back(uint8_t(hi * 16 + v)); hi = -1; } } }
+            std::printf("; patch %llx (%zu bytes): %s\n", (unsigned long long)va, pb.size(),
+                        applyPatch(im, va, pb.data(), pb.size()) ? "ok" : "out of range");
+        }
+        if (savePath) {
+            FILE* o = std::fopen(savePath, "wb");
+            if (o) { std::fwrite(im.file.data(), 1, im.file.size(), o); std::fclose(o); std::printf("; saved %s\n", savePath); }
+            return 0;
+        }
         std::printf("; %s  %s  imagebase %llx  entry %llx\n", im.format.c_str(),
                     im.machine.empty() ? "?" : im.machine.c_str(),
                     (unsigned long long)im.imageBase, (unsigned long long)im.entry);
