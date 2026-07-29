@@ -99,6 +99,16 @@ std::string mnemStr(const Instruction& insn) {
         case Mnemonic::Jcc: return std::string("j") + kCC[insn.cc & 15];
         case Mnemonic::Setcc: return std::string("set") + kCC[insn.cc & 15];
         case Mnemonic::Cmovcc: return std::string("cmov") + kCC[insn.cc & 15];
+        case Mnemonic::Syscall: return "syscall"; case Mnemonic::Ud2: return "ud2";
+        case Mnemonic::Cmc: return "cmc"; case Mnemonic::Clc: return "clc"; case Mnemonic::Stc: return "stc";
+        case Mnemonic::Cld: return "cld"; case Mnemonic::Std: return "std"; case Mnemonic::Cli: return "cli";
+        case Mnemonic::Sti: return "sti"; case Mnemonic::Pushf: return "pushf"; case Mnemonic::Popf: return "popf";
+        case Mnemonic::Movs: case Mnemonic::Stos: case Mnemonic::Lods: case Mnemonic::Scas: case Mnemonic::Cmps: {
+            const char* base = insn.mnemonic == Mnemonic::Movs ? "movs" : insn.mnemonic == Mnemonic::Stos ? "stos" :
+                               insn.mnemonic == Mnemonic::Lods ? "lods" : insn.mnemonic == Mnemonic::Scas ? "scas" : "cmps";
+            const char* sfx = insn.suffix == 1 ? "b" : insn.suffix == 2 ? "w" : insn.suffix == 8 ? "q" : "d";
+            return std::string(base) + sfx;
+        }
         default: return "(bad)";
     }
 }

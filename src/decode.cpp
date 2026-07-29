@@ -52,6 +52,8 @@ void addOp(Instruction& insn, const Operand& o) {
 bool decode0F(Reader& r, Instruction& insn) {
     const Prefixes& p = insn.prefixes;
     uint8_t op = r.u8();
+    if (op == 0x05) { insn.mnemonic = M::Syscall; return true; }
+    if (op == 0x0B) { insn.mnemonic = M::Ud2; return true; }
     if (op == 0x1F) { Operand e; decodeModRM(r, p, SZv(p), e); insn.mnemonic = M::Nop; addOp(insn, e); return true; }
     if (op == 0x31) { insn.mnemonic = M::Rdtsc; return true; }
     if (op == 0xA2) { insn.mnemonic = M::Cpuid; return true; }
@@ -151,6 +153,25 @@ bool decodeOne(Reader& r, Instruction& insn, uint8_t op) {
             }
             addOp(insn, e); return true;
         }
+        case 0x9C: insn.mnemonic = M::Pushf; return true;
+        case 0x9D: insn.mnemonic = M::Popf; return true;
+        case 0xA4: insn.mnemonic = M::Movs; insn.suffix = 1; return true;
+        case 0xA5: insn.mnemonic = M::Movs; insn.suffix = uint8_t(SZv(p)); return true;
+        case 0xA6: insn.mnemonic = M::Cmps; insn.suffix = 1; return true;
+        case 0xA7: insn.mnemonic = M::Cmps; insn.suffix = uint8_t(SZv(p)); return true;
+        case 0xAA: insn.mnemonic = M::Stos; insn.suffix = 1; return true;
+        case 0xAB: insn.mnemonic = M::Stos; insn.suffix = uint8_t(SZv(p)); return true;
+        case 0xAC: insn.mnemonic = M::Lods; insn.suffix = 1; return true;
+        case 0xAD: insn.mnemonic = M::Lods; insn.suffix = uint8_t(SZv(p)); return true;
+        case 0xAE: insn.mnemonic = M::Scas; insn.suffix = 1; return true;
+        case 0xAF: insn.mnemonic = M::Scas; insn.suffix = uint8_t(SZv(p)); return true;
+        case 0xF5: insn.mnemonic = M::Cmc; return true;
+        case 0xF8: insn.mnemonic = M::Clc; return true;
+        case 0xF9: insn.mnemonic = M::Stc; return true;
+        case 0xFA: insn.mnemonic = M::Cli; return true;
+        case 0xFB: insn.mnemonic = M::Sti; return true;
+        case 0xFC: insn.mnemonic = M::Cld; return true;
+        case 0xFD: insn.mnemonic = M::Std; return true;
         default: return false;
     }
     return false;

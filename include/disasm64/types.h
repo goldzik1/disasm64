@@ -69,6 +69,8 @@ enum class Mnemonic : uint16_t {
     Movzx, Movsx, Movsxd, Cwde, Cdqe, Cdq, Cqo,
     Jmp, Jcc, Call, Ret, Leave, Int3, Int, Hlt, Cpuid, Rdtsc,
     Setcc, Cmovcc,
+    Syscall, Ud2, Cmc, Clc, Stc, Cld, Std, Cli, Sti, Pushf, Popf,
+    Movs, Stos, Lods, Scas, Cmps,
     Count
 };
 
@@ -79,6 +81,7 @@ struct Instruction {
     uint8_t length = 0;
     Mnemonic mnemonic = Mnemonic::Invalid;
     uint8_t cc = 0;                 // condition code nibble for Jcc/Setcc/Cmovcc
+    uint8_t suffix = 0;             // size (1/2/4/8) for a size-suffixed mnemonic (string ops)
     Operand operands[4];
     uint8_t operandCount = 0;
     Prefixes prefixes;

@@ -28,4 +28,10 @@ TEST_MAIN({
     CHECK_STR(fmt({0x0F, 0xB6, 0xC1}), "movzx eax, cl");
     CHECK_STR(fmt({0x74, 0x05}), "je 0x7");
     CHECK_STR(fmt({0x48, 0xFF, 0xC0}), "inc rax");
+    CHECK_STR(fmt({0xA4}), "movsb");
+    CHECK_STR(fmt({0x48, 0xA5}), "movsq");
+    CHECK_STR(fmt({0xF3, 0xAA}), "rep stosb");
+    CHECK_STR(fmt({0x0F, 0x05}), "syscall");
+    CHECK_STR(fmt({0xFC}), "cld");
+    CHECK_STR(fmt({0x9C}), "pushf");
 })
